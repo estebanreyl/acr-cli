@@ -18,6 +18,7 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"oras.land/oras-go/v2/registry"
 )
 
 // Constants that are used throughout this file.
@@ -295,6 +296,23 @@ func (c *AcrCLIClient) GetManifest(ctx context.Context, repoName string, referen
 	return manifestBytes, nil
 }
 
+// GetReferrers gets all manifests that reference the given manifest descriptor as their subject
+func (client *AcrCLIClient) GetReferrers(ctx context.Context, repoName string, subject v1.Descriptor) ([]v1.Descriptor, error) {
+	// Create ORAS client to use the Referrers API
+	orasClient, err := GetORASClientWithAuth("", "", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	repo, err := orasClient.getTarget(client.loginURL + "/" + repoName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Use registry.Referrers to get all referrers
+	return registry.Referrers(ctx, repo, subject, "")
+}
+
 // AcrCLIClientInterface defines the required methods that the acr-cli will need to use.
 type AcrCLIClientInterface interface {
 	GetAcrTags(ctx context.Context, repoName string, orderBy string, last string) (*acrapi.RepositoryTagsType, error)
@@ -302,4 +320,5 @@ type AcrCLIClientInterface interface {
 	GetAcrManifests(ctx context.Context, repoName string, orderBy string, last string) (*acrapi.Manifests, error)
 	DeleteManifest(ctx context.Context, repoName string, reference string) (*autorest.Response, error)
 	GetManifest(ctx context.Context, repoName string, reference string) ([]byte, error)
+	GetReferrers(ctx context.Context, repoName string, subject v1.Descriptor) ([]v1.Descriptor, error)
 }

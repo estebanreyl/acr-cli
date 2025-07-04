@@ -21,6 +21,7 @@ import (
 	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/alitto/pond/v2"
 	"github.com/dlclark/regexp2"
+	digestpkg "github.com/opencontainers/go-digest"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -149,6 +150,25 @@ func GetLastTagFromResponse(resultTags *acr.RepositoryTagsType) string {
 	return vals.Get("last")
 }
 
+// IsManifestDeletable checks if a manifest can be deleted based on its changeable attributes
+func IsManifestDeletable(manifest acr.ManifestAttributesBase) bool {
+	if manifest.ChangeableAttributes == nil {
+		return true
+	}
+
+	// Check if deletion is disabled
+	if manifest.ChangeableAttributes.DeleteEnabled != nil && !(*manifest.ChangeableAttributes.DeleteEnabled) {
+		return false
+	}
+
+	// Check if writing is disabled
+	if manifest.ChangeableAttributes.WriteEnabled != nil && !(*manifest.ChangeableAttributes.WriteEnabled) {
+		return false
+	}
+
+	return true
+}
+
 // GetUntaggedManifests gets all the manifests for the command to be executed on. The command will be executed on this manifest if it does not
 // have any tag and does not form part of a manifest list that has tags referencing it. If the purge command is to be executed,
 // the manifest should also not have a tag and not have a subject manifest.
@@ -200,13 +220,8 @@ func GetUntaggedManifests(ctx context.Context, poolSize int, acrClient api.AcrCL
 
 			// _____MANIFEST HAS DELETION AS DISALLOWED BY ATTRIBUTES_____
 			// If the manifest cannot be deleted or written to we can skip them (ACR will not allow deletion of these manifests)
-			if manifest.ChangeableAttributes != nil {
-				if manifest.ChangeableAttributes.DeleteEnabled != nil && !(*manifest.ChangeableAttributes.DeleteEnabled) {
-					continue
-				}
-				if manifest.ChangeableAttributes.WriteEnabled != nil && !(*manifest.ChangeableAttributes.WriteEnabled) {
-					continue
-				}
+			if !IsManifestDeletable(manifest) {
+				continue
 			}
 
 			// _____MANIFEST IS TAGGED_____
@@ -502,5 +517,152 @@ func addDependentManifestsToIgnoreList(ctx context.Context, dependentManifests [
 			}
 		}
 	}
+	return nil
+}
+
+// GetAllTagRelatedManifests retrieves all manifests related to tags in the specified repository.
+// It identifies manifests as tagged if they meet any of these criteria:
+// 1) Directly tagged manifests
+// 2) For manifest lists or OCI indexes, their containing manifests are considered tagged
+// 3) Subject manifests (of referrer manifests) are considered tagged
+// 4) Referrer manifests are considered tagged (upward search: all manifests that reference a tagged manifest as their subject)
+func GetAllTagRelatedManifests(ctx context.Context, poolSize int, acrClient api.AcrCLIClientInterface, repoName string) (map[string]struct{}, error) {
+	// Step 1: Get all tags from the repository
+	taggedManifests := make(map[string]struct{})
+	lastTag := ""
+
+	// Get all tags and mark associated manifests
+	for {
+		resultTags, err := acrClient.GetAcrTags(ctx, repoName, "", lastTag)
+		if err != nil {
+			return nil, err
+		}
+
+		if resultTags == nil || resultTags.TagsAttributes == nil || len(*resultTags.TagsAttributes) == 0 {
+			// Repository not found or no tags available - this is not an error, just break
+			break
+		}
+
+		tags := *resultTags.TagsAttributes
+
+		// Use goroutine pool for concurrent processing
+		pool := pond.NewPool(poolSize, pond.WithContext(ctx), pond.WithQueueSize(poolSize*3), pond.WithNonBlocking(false))
+		group := pool.NewGroup()
+
+		// Mutex to protect taggedManifests map
+		var mu sync.Mutex
+
+		for _, tag := range tags {
+			if tag.Digest == nil {
+				continue
+			}
+
+			tagDigest := *tag.Digest
+
+			// Mark directly tagged manifest
+			mu.Lock()
+			taggedManifests[tagDigest] = struct{}{}
+			mu.Unlock()
+			// Process manifest to find dependencies and referrers
+			group.SubmitErr(func() error {
+				return processManifestForTagging(ctx, acrClient, repoName, tagDigest, taggedManifests, &mu)
+			})
+		}
+
+		// Wait for all goroutines to complete
+		if err := group.Wait(); err != nil {
+			return nil, err
+		}
+
+		// Get next batch of tags
+		lastTag = GetLastTagFromResponse(resultTags)
+		if lastTag == "" {
+			break
+		}
+	}
+
+	return taggedManifests, nil
+}
+
+// processManifestForTagging processes a manifest to identify all related manifests that should be considered tagged
+func processManifestForTagging(ctx context.Context, acrClient api.AcrCLIClientInterface, repoName string, manifestDigest string, taggedManifests map[string]struct{}, mu *sync.Mutex) error {
+	// Get the manifest content
+	manifestBytes, err := acrClient.GetManifest(ctx, repoName, manifestDigest)
+	if err != nil {
+		errParsed := autorest.DetailedError{}
+		if errors.As(err, &errParsed) && errParsed.StatusCode == http.StatusNotFound {
+			// Manifest not found, skip it
+			return nil
+		}
+		return err
+	}
+
+	// Minimal struct to parse out successor manifests
+	var manifestStruct struct {
+		MediaType string          `json:"mediaType"`
+		Subject   *v1.Descriptor  `json:"subject,omitempty"`
+		Manifests []v1.Descriptor `json:"manifests,omitempty"`
+	}
+
+	if err := json.Unmarshal(manifestBytes, &manifestStruct); err != nil {
+		return fmt.Errorf("failed to unmarshal manifest %s: %w", manifestDigest, err)
+	}
+
+	// Handle manifest lists and OCI indexes - mark containing manifests as tagged
+	if len(manifestStruct.Manifests) > 0 {
+		for _, subManifest := range manifestStruct.Manifests {
+			mu.Lock()
+			taggedManifests[string(subManifest.Digest)] = struct{}{}
+			mu.Unlock()
+
+			// Recursively process sub-manifests (in case of nested indexes)
+			if subManifest.MediaType == v1.MediaTypeImageIndex || subManifest.MediaType == mediaTypeDockerManifestList {
+				if err := processManifestForTagging(ctx, acrClient, repoName, string(subManifest.Digest), taggedManifests, mu); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	// Handle subject manifests - mark subject manifest as tagged
+	if manifestStruct.Subject != nil && manifestStruct.Subject.Digest != "" {
+		mu.Lock()
+		taggedManifests[string(manifestStruct.Subject.Digest)] = struct{}{}
+		mu.Unlock()
+	}
+
+	// Handle referrer manifests - find all manifests that reference this manifest as their subject
+	subjectDescriptor := v1.Descriptor{
+		Digest:    digestpkg.Digest(manifestDigest),
+		MediaType: manifestStruct.MediaType,
+		Size:      int64(len(manifestBytes)),
+	}
+	if err := findAndMarkReferrers(ctx, acrClient, repoName, subjectDescriptor, taggedManifests, mu); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// findAndMarkReferrers finds all manifests that reference the given manifest as their subject and marks them as tagged
+// This function now uses the ACR client's GetReferrers method which leverages the registry Referrers API
+func findAndMarkReferrers(ctx context.Context, acrClient api.AcrCLIClientInterface, repoName string, subject v1.Descriptor, taggedManifests map[string]struct{}, mu *sync.Mutex) error {
+	// Use the registry Referrers API to get all referrers
+	referrers, err := acrClient.GetReferrers(ctx, repoName, subject)
+	if err != nil {
+		return err
+	}
+
+	// Mark all found referrers as tagged and recursively search their referrers
+	for _, referrer := range referrers {
+		mu.Lock()
+		taggedManifests[referrer.Digest.String()] = struct{}{}
+		mu.Unlock()
+		// Recursively find referrers of this referrer (upward chain)
+		if err := findAndMarkReferrers(ctx, acrClient, repoName, referrer, taggedManifests, mu); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
