@@ -5,7 +5,6 @@ package worker
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"sync/atomic"
 
@@ -38,13 +37,20 @@ func NewPurger(repoParallelism int, acrClient api.AcrCLIClientInterface, loginUR
 
 // PurgeTags purges a list of tags concurrently, and returns a count of deleted tags and the first error occurred.
 func (p *Purger) PurgeTags(ctx context.Context, tags []acr.TagAttributesBase) (int, error) {
+	log := logger.Get().With().
+		Str(logger.FieldRepository, p.repoName).
+		Int(logger.FieldTagCount, len(tags)).
+		Logger()
+
+	log.Debug().Msg("Starting concurrent tag deletion")
+
 	var deletedTags atomic.Int64 // Count of successfully deleted tags
 	group := p.pool.NewGroup()
 	for _, tag := range tags {
 		group.SubmitErr(func() error {
 			resp, err := p.acrClient.DeleteAcrTag(ctx, p.repoName, *tag.Name)
 			if err == nil {
-				fmt.Printf("Deleted %s/%s:%s\n", p.loginURL, p.repoName, *tag.Name)
+				log.Info().Str("loginURL", p.loginURL).Str(logger.FieldTag, *tag.Name).Msg("Deleted tag")
 				// Increment the count of successfully deleted tags atomically
 				deletedTags.Add(1)
 				return nil
@@ -53,11 +59,11 @@ func (p *Purger) PurgeTags(ctx context.Context, tags []acr.TagAttributesBase) (i
 			if resp != nil && resp.Response != nil && resp.StatusCode == http.StatusNotFound {
 				// If the tag is not found it can be assumed to have been deleted.
 				deletedTags.Add(1)
-				fmt.Printf("Skipped %s/%s:%s, HTTP status: %d\n", p.loginURL, p.repoName, *tag.Name, resp.StatusCode)
+				log.Warn().Str("loginURL", p.loginURL).Str(logger.FieldTag, *tag.Name).Int("status", resp.StatusCode).Msg("Skipped tag, HTTP status")
 				return nil
 			}
 
-			fmt.Printf("Failed to delete %s/%s:%s, error: %v\n", p.loginURL, p.repoName, *tag.Name, err)
+			log.Error().Str("loginURL", p.loginURL).Str(logger.FieldTag, *tag.Name).Err(err).Msg("Failed to delete tag")
 			return err
 		})
 	}
@@ -67,12 +73,12 @@ func (p *Purger) PurgeTags(ctx context.Context, tags []acr.TagAttributesBase) (i
 
 // PurgeManifests purges a list of manifests concurrently, and returns a count of deleted manifests and the first error occurred.
 func (p *Purger) PurgeManifests(ctx context.Context, manifests []string) (int, error) {
-	log := logger.Get()
-	
-	log.Info().
+	log := logger.Get().With().
 		Str(logger.FieldRepository, p.repoName).
 		Int(logger.FieldManifestCount, len(manifests)).
-		Msg("Starting concurrent manifest deletion")
+		Logger()
+
+	log.Info().Msg("Starting concurrent manifest deletion")
 
 	var deletedManifests atomic.Int64 // Count of successfully deleted manifests
 	group := p.pool.NewGroup()
@@ -80,15 +86,8 @@ func (p *Purger) PurgeManifests(ctx context.Context, manifests []string) (int, e
 		group.SubmitErr(func() error {
 			resp, err := p.acrClient.DeleteManifest(ctx, p.repoName, manifest)
 			if err == nil {
-				// Keep fmt.Printf for user output consistency
-				fmt.Printf("Deleted %s/%s@%s\n", p.loginURL, p.repoName, manifest)
-				
-				log.Info().
-					Str(logger.FieldRepository, p.repoName).
-					Str(logger.FieldManifest, manifest).
-					Str(logger.FieldRef, fmt.Sprintf("%s/%s@%s", p.loginURL, p.repoName, manifest)).
-					Msg("Successfully deleted manifest")
-				
+				log.Info().Str("loginURL", p.loginURL).Str(logger.FieldManifest, manifest).Msg("Deleted manifest")
+
 				// Increment the count of successfully deleted manifests atomically
 				deletedManifests.Add(1)
 				return nil
@@ -97,40 +96,23 @@ func (p *Purger) PurgeManifests(ctx context.Context, manifests []string) (int, e
 			if resp != nil && resp.Response != nil && resp.StatusCode == http.StatusNotFound {
 				// If the manifest is not found it can be assumed to have been deleted.
 				deletedManifests.Add(1)
-				
-				// Keep fmt.Printf for user output consistency  
-				fmt.Printf("Skipped %s/%s@%s, HTTP status: %d\n", p.loginURL, p.repoName, manifest, resp.StatusCode)
-				
-				log.Warn().
-					Str(logger.FieldRepository, p.repoName).
-					Str(logger.FieldManifest, manifest).
-					Str(logger.FieldRef, fmt.Sprintf("%s/%s@%s", p.loginURL, p.repoName, manifest)).
-					Int(logger.FieldStatusCode, resp.StatusCode).
-					Msg("Manifest not found during deletion, assuming already deleted")
+
+				log.Warn().Str("loginURL", p.loginURL).Str(logger.FieldManifest, manifest).Int("status", resp.StatusCode).Msg("Skipped manifest, HTTP status")
 				return nil
 			}
 
-			// Keep fmt.Printf for user output consistency
-			fmt.Printf("Failed to delete %s/%s@%s, error: %v\n", p.loginURL, p.repoName, manifest, err)
-			
-			log.Error().
-				Err(err).
-				Str(logger.FieldRepository, p.repoName).
-				Str(logger.FieldManifest, manifest).
-				Str(logger.FieldRef, fmt.Sprintf("%s/%s@%s", p.loginURL, p.repoName, manifest)).
-				Msg("Failed to delete manifest")
+			log.Error().Str("loginURL", p.loginURL).Str(logger.FieldManifest, manifest).Err(err).Msg("Failed to delete manifest")
 			return err
 
 		})
 	}
 	err := group.Wait()
-	
+
 	finalCount := int(deletedManifests.Load())
 	log.Info().
-		Str(logger.FieldRepository, p.repoName).
 		Int(logger.FieldDeletedCount, finalCount).
 		Int(logger.FieldAttemptedCount, len(manifests)).
 		Msg("Completed manifest deletion batch")
-		
+
 	return finalCount, err
 }

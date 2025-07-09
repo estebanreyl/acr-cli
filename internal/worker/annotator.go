@@ -52,12 +52,13 @@ func NewAnnotator(poolSize int, orasClient api.ORASClientInterface, loginURL str
 
 // AnnotateManifests annotates a list of manifests concurrently and returns a count of annotated images and the first error occurred.
 func (a *Annotator) Annotate(ctx context.Context, manifests []string) (int, error) {
-	log := logger.Get()
-	
-	log.Debug().
+	log := logger.Get().With().
 		Str(logger.FieldRepository, a.repoName).
 		Int(logger.FieldManifestCount, len(manifests)).
 		Str(logger.FieldArtifactType, a.artifactType).
+		Logger()
+
+	log.Debug().
 		Interface("annotations", a.annotations).
 		Msg("Starting concurrent manifest annotation")
 
@@ -78,7 +79,7 @@ func (a *Annotator) Annotate(ctx context.Context, manifests []string) (int, erro
 				return err // TODO: #469 Do we want to fail the whole job if one fails? This is the current behaviour.
 			}
 			annotatedImages.Add(1)
-			
+
 			log.Info().
 				Str(logger.FieldRepository, a.repoName).
 				Str(logger.FieldManifest, digest).
@@ -90,14 +91,14 @@ func (a *Annotator) Annotate(ctx context.Context, manifests []string) (int, erro
 		})
 	}
 	err := group.Wait()
-	
+
 	finalCount := int(annotatedImages.Load())
 	log.Info().
 		Str(logger.FieldRepository, a.repoName).
 		Int("annotated_count", finalCount).
 		Int(logger.FieldAttemptedCount, len(manifests)).
 		Msg("Completed manifest annotation batch")
-		
+
 	return finalCount, err
 }
 

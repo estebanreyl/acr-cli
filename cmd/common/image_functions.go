@@ -157,7 +157,7 @@ func GetLastTagFromResponse(resultTags *acr.RepositoryTagsType) string {
 // under dryRun conditions. Its ignored if the dryRun flag is false.
 func GetUntaggedManifests(ctx context.Context, poolSize int, acrClient api.AcrCLIClientInterface, repoName string, preserveAllOCIManifests bool, manifestToDeletedTagsCountMap map[string]int, dryRun bool) ([]string, error) {
 	log := logger.Get().With().Str(logger.FieldRepository, repoName).Logger()
-	
+
 	log.Debug().
 		Int("pool_size", poolSize).
 		Bool("preserve_all_oci_manifests", preserveAllOCIManifests).
@@ -169,10 +169,7 @@ func GetUntaggedManifests(ctx context.Context, poolSize int, acrClient api.AcrCL
 	resultManifests, err := acrClient.GetAcrManifests(ctx, repoName, "", lastManifestDigest)
 	if err != nil {
 		if resultManifests != nil && resultManifests.Response.Response != nil && resultManifests.StatusCode == http.StatusNotFound {
-			log.Warn().
-				Int(logger.FieldStatusCode, resultManifests.StatusCode).
-				Msg("Repository not found, skipping manifest evaluation")
-			fmt.Printf("%s repository not found\n", repoName)
+			log.Warn().Str("repository", repoName).Msg("Repository not found, skipping manifest evaluation")
 			return manifestsToDelete, nil
 		}
 		log.Error().Err(err).Msg("Failed to get manifests from repository")
@@ -240,7 +237,7 @@ func GetUntaggedManifests(ctx context.Context, poolSize int, acrClient api.AcrCL
 				if manifestToDeletedTagsCountMap != nil {
 					tagsRemaining = len(*manifest.Tags) - manifestToDeletedTagsCountMap[*manifest.Digest]
 				}
-				
+
 				log.Debug().
 					Str(logger.FieldManifest, *manifest.Digest).
 					Str(logger.FieldReason, "has_tags").
@@ -261,7 +258,7 @@ func GetUntaggedManifests(ctx context.Context, poolSize int, acrClient api.AcrCL
 							Msg("Manifest excluded from purge - tagged non-list manifest")
 						continue
 					}
-					
+
 					log.Debug().
 						Str(logger.FieldManifest, *manifest.Digest).
 						Str(logger.FieldMediaType, *manifest.MediaType).
@@ -423,18 +420,15 @@ type dependentManifestResult struct {
 // findDirectDependentManifests finds all the manifests that are directly dependent on the provided manifest digest. We expect the manifest to be a multiarch manifest or an index.
 // It returns a list of dependent manifests with their digests and whether they are lists or not.
 func findDirectDependentManifests(ctx context.Context, manifestDigest string, acrClient api.AcrCLIClientInterface, repoName string) ([]dependentManifestResult, error) {
+	log := logger.Get().With().Str(logger.FieldRepository, repoName).Logger()
+
 	var manifestBytes []byte
 	manifestBytes, err := acrClient.GetManifest(ctx, repoName, manifestDigest)
 	if err != nil {
 		errParsed := azure.RequestError{}
 		if errors.As(err, &errParsed) && errParsed.StatusCode == http.StatusNotFound {
 			// If the manifest is not found, we can return an empty list
-			log := logger.Get()
-			log.Warn().
-				Str(logger.FieldRepository, repoName).
-				Str(logger.FieldManifest, manifestDigest).
-				Interface(logger.FieldStatusCode, errParsed.StatusCode).
-				Msg("Manifest not found when finding dependencies, returning empty list")
+			log.Warn().Str(logger.FieldRepository, repoName).Str(logger.FieldManifest, manifestDigest).Interface(logger.FieldStatusCode, errParsed.StatusCode).Msg("Manifest not found when finding dependencies, returning empty list")
 			return []dependentManifestResult{}, nil
 		}
 		return nil, err

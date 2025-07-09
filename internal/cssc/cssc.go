@@ -286,13 +286,13 @@ func ApplyFilterAndGetFilteredList(ctx context.Context, acrClient api.AcrCLIClie
 
 // Prints the filtered result to the console
 func PrintFilteredResult(filteredResult []FilteredRepository, showPatchTags bool) {
-	log := logger.Get()
-	
-	log.Info().
+	log := logger.Get().With().
 		Int("result_count", len(filteredResult)).
 		Bool("show_patch_tags", showPatchTags).
-		Msg("Printing filtered repository results")
-	
+		Logger()
+
+	log.Info().Msg("Printing filtered repository results")
+
 	if len(filteredResult) == 0 {
 		fmt.Println("No matching repository and tag found!")
 		log.Info().Msg("No matching repositories found")
@@ -323,20 +323,20 @@ func PrintFilteredResult(filteredResult []FilteredRepository, showPatchTags bool
 
 // Prints the artifacts not found to the console
 func PrintNotFoundArtifacts(artifactsNotFound []FilteredRepository) {
-	log := logger.Get()
-	
+	log := logger.Get().With().
+		Int("not_found_count", len(artifactsNotFound)).
+		Logger()
+
 	if len(artifactsNotFound) > 0 {
-		log.Warn().
-			Int("not_found_count", len(artifactsNotFound)).
-			Msg("Some artifacts specified in filter were not found")
-		
+		log.Warn().Msg("Some artifacts specified in filter were not found")
+
 		fmt.Printf("%s\n", "Artifacts specified in the filter that do not exist:")
 		fmt.Printf("%s,%s\n", "Repo", "Tag")
 		for _, result := range artifactsNotFound {
 			fmt.Printf("%s,%s\n", result.Repository, result.Tag)
 			log.Debug().
-				Str("repository", result.Repository).
-				Str("tag", result.Tag).
+				Str(logger.FieldRepository, result.Repository).
+				Str(logger.FieldTag, result.Tag).
 				Msg("Artifact not found")
 		}
 		fmt.Println("Not found:", len(artifactsNotFound))
