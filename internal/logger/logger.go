@@ -18,15 +18,28 @@ type Config struct {
 }
 
 // Setup configures the global logger based on the provided config
+// Supported formats:
+// - "console": Human-readable format with colors and formatting
+// - "plaintext": Human-readable format without colors (good for piping to files)
+// - "json": Machine-readable JSON format (default)
 func Setup(config Config) {
 	// Set log level
 	level := parseLogLevel(config.Level)
 	zerolog.SetGlobalLevel(level)
 
 	// Set log format
-	if strings.ToLower(config.Format) == "console" {
+	switch strings.ToLower(config.Format) {
+	case "console":
+		// Console format with colors and formatting
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-	} else {
+	case "plaintext":
+		// Plain text format without colors - good for piping to files
+		log.Logger = log.Output(zerolog.ConsoleWriter{
+			Out:        os.Stderr,
+			NoColor:    true,
+			TimeFormat: "2006-01-02 15:04:05",
+		})
+	default:
 		// Default to JSON format
 		log.Logger = zerolog.New(os.Stderr).With().Timestamp().Logger()
 	}

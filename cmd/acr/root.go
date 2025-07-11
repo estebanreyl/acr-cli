@@ -66,7 +66,7 @@ To start working with the CLI, run acr --help`,
 	cmd.PersistentFlags().StringVarP(&rootParams.username, "username", "u", "", "Registry username")
 	cmd.PersistentFlags().StringVarP(&rootParams.password, "password", "p", "", "Registry password")
 	cmd.PersistentFlags().StringVar(&rootParams.logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
-	cmd.PersistentFlags().StringVar(&rootParams.logFormat, "log-format", "console", "Log format (console, json)")
+	cmd.PersistentFlags().StringVar(&rootParams.logFormat, "log-format", "console", "Log format (console, plaintext, json)")
 	cmd.Flags().BoolP("help", "h", false, "Print usage")
 	cmd.Flags().StringArrayVarP(&rootParams.configs, "config", "c", nil, "Auth config paths")
 	// No parameter is marked as required because the registry could be inferred from a task context, same with username and password
