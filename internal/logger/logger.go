@@ -63,6 +63,7 @@ const (
 	FieldDeletedCount   = "deleted_count"
 	FieldAttemptedCount = "attempted_count"
 	FieldMediaType      = "media_type"
+	FieldTagConvention  = "tag_convention"
 )
 
 // Get returns the global logger

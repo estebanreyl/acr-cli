@@ -108,7 +108,7 @@ func newPurgeCmd(rootParams *rootParameters) *cobra.Command {
 			}
 			// A clarification message for --dry-run.
 			if purgeParams.dryRun {
-				fmt.Println("DRY RUN: The following output shows what WOULD be deleted if the purge command was executed. Nothing is deleted.")
+				log.Info().Msg("DRY RUN: The following output shows what WOULD be deleted if the purge command was executed. Nothing is deleted.")
 			}
 
 			// The number of concurrent requests will be ultimately limited by what repoParallelism is set to. This value

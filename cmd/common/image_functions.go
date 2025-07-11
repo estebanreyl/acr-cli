@@ -457,11 +457,12 @@ func BuildRegexFilter(expression string, regexpMatchTimeoutSeconds int64) (*rege
 // to avoid double-fetching the same manifest. It returns whether the manifest can be deleted and its dependencies if it's an index.
 func checkManifestDeletabilityAndGetDependencies(ctx context.Context, manifest acr.ManifestAttributesBase, acrClient api.AcrCLIClientInterface, repoName string) (bool, []dependentManifestResult, error) {
 	var dependentManifests []dependentManifestResult
+	log := logger.Get()
 
 	// Check media type first to avoid unnecessary GetManifest calls
 	if manifest.MediaType == nil {
 		// No media type, do not delete this manifest to be on the safe side
-		fmt.Println("Manifest", *manifest.Digest, "has no media type, skipping deletion")
+		log.Warn().Str(logger.FieldManifest, *manifest.Digest).Msg("Manifest has no media type, skipping deletion")
 		return false, dependentManifests, nil
 	}
 
@@ -474,7 +475,7 @@ func checkManifestDeletabilityAndGetDependencies(ctx context.Context, manifest a
 		if err != nil {
 			errParsed := autorest.DetailedError{}
 			if errors.As(err, &errParsed) && errParsed.StatusCode == http.StatusNotFound {
-				fmt.Println("Manifest", *manifest.Digest, "not found, skip it")
+				log.Warn().Str(logger.FieldManifest, *manifest.Digest).Msg("Manifest not found, skipping deletion")
 				return false, dependentManifests, nil
 			}
 			return false, dependentManifests, err

@@ -137,7 +137,8 @@ func GetFilterFromFilePath(filePath string) (Filter, error) {
 
 // Validates the filter and returns an error if the filter is invalid
 func (filter *Filter) ValidateFilter() error {
-	fmt.Println("Validating filter...")
+	log := logger.Get()
+	log.Info().Msg("Validating filter")
 	const versionV1 = "v1"
 	if filter.Version == "" || filter.Version != versionV1 {
 		return errors.New("Version is required in the filter and should be " + versionV1)
@@ -294,13 +295,16 @@ func PrintFilteredResult(filteredResult []FilteredRepository, showPatchTags bool
 	log.Info().Msg("Printing filtered repository results")
 
 	if len(filteredResult) == 0 {
-		fmt.Println("No matching repository and tag found!")
-		log.Info().Msg("No matching repositories found")
+		log.Info().Msg("No matching repository and tag found")
 	} else if showPatchTags {
-		fmt.Println("Listing repositories and tags matching the filter with corresponding latest patch tag (if present):")
-		fmt.Printf("%s,%s,%s\n", "Repo", "Tag", "LatestPatchTag")
+		log.Info().Msg("Listing repositories and tags matching the filter with corresponding latest patch tag (if present)")
+		log.Info().Str("format", "Repo,Tag,LatestPatchTag").Msg("CSV Header")
 		for _, result := range filteredResult {
-			fmt.Printf("%s,%s,%s\n", result.Repository, result.Tag, result.PatchTag)
+			log.Info().
+				Str(logger.FieldRepository, result.Repository).
+				Str(logger.FieldTag, result.Tag).
+				Str("patch_tag", result.PatchTag).
+				Msg("Match found with patch tag")
 			log.Debug().
 				Str("repository", result.Repository).
 				Str("tag", result.Tag).
@@ -308,17 +312,16 @@ func PrintFilteredResult(filteredResult []FilteredRepository, showPatchTags bool
 				Msg("Repository result with patch tag")
 		}
 	} else {
-		fmt.Println("Listing repositories and tags matching the filter:")
-		fmt.Printf("%s,%s\n", "Repo", "Tag")
+		log.Info().Msg("Listing repositories and tags matching the filter")
+		log.Info().Str("format", "Repo,Tag").Msg("CSV Header")
 		for _, result := range filteredResult {
-			fmt.Printf("%s,%s\n", result.Repository, result.Tag)
-			log.Debug().
-				Str("repository", result.Repository).
-				Str("tag", result.Tag).
-				Msg("Repository result")
+			log.Info().
+				Str(logger.FieldRepository, result.Repository).
+				Str(logger.FieldTag, result.Tag).
+				Msg("Match found")
 		}
 	}
-	fmt.Println("Matches found:", len(filteredResult))
+	log.Info().Int("matches_found", len(filteredResult)).Msg("Search completed")
 }
 
 // Prints the artifacts not found to the console
@@ -329,17 +332,15 @@ func PrintNotFoundArtifacts(artifactsNotFound []FilteredRepository) {
 
 	if len(artifactsNotFound) > 0 {
 		log.Warn().Msg("Some artifacts specified in filter were not found")
-
-		fmt.Printf("%s\n", "Artifacts specified in the filter that do not exist:")
-		fmt.Printf("%s,%s\n", "Repo", "Tag")
+		log.Info().Msg("Artifacts specified in the filter that do not exist")
+		log.Info().Str("format", "Repo,Tag").Msg("CSV Header")
 		for _, result := range artifactsNotFound {
-			fmt.Printf("%s,%s\n", result.Repository, result.Tag)
-			log.Debug().
+			log.Warn().
 				Str(logger.FieldRepository, result.Repository).
 				Str(logger.FieldTag, result.Tag).
 				Msg("Artifact not found")
 		}
-		fmt.Println("Not found:", len(artifactsNotFound))
+		log.Info().Int("not_found_count", len(artifactsNotFound)).Msg("Summary of not found artifacts")
 	} else {
 		log.Debug().Msg("All specified artifacts were found")
 	}

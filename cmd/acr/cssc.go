@@ -5,11 +5,11 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	orasauth "github.com/Azure/acr-cli/auth/oras"
 	"github.com/Azure/acr-cli/internal/api"
 	"github.com/Azure/acr-cli/internal/cssc"
+	"github.com/Azure/acr-cli/internal/logger"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -75,6 +75,7 @@ func newPatchFilterCmd(csscParams *csscParameters) *cobra.Command {
 		Short: "[Preview] Run cssc patch operations for a registry",
 		Long:  newPatchCmdLongMessage,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			log := logger.Get()
 			ctx := context.Background()
 			registryName, err := csscParams.GetRegistryName()
 			if err != nil {
@@ -95,18 +96,18 @@ func newPatchFilterCmd(csscParams *csscParameters) *cobra.Command {
 			} else if !csscParams.dryRun && csscParams.filterPolicy != "" {
 				return errors.New("patch command without --dry-run is not operational at the moment and will be enabled in future releases")
 			} else if csscParams.dryRun {
-				fmt.Println("DRY RUN mode enabled...")
-				fmt.Println("DRY RUN mode will only list all the repositories and tags that match the filter and are eligible for continuous scan and patch. During the actual patch operation, each of the eligible images will first be scanned using trivy and if there are any vulnerabilities found, a new patched image will be generated with tag <originaltag>-patched or <originaltag>-x based on the configured tag-convention.")
+				log.Info().Msg("DRY RUN mode enabled...")
+				log.Info().Msg("DRY RUN mode will only list all the repositories and tags that match the filter and are eligible for continuous scan and patch. During the actual patch operation, each of the eligible images will first be scanned using trivy and if there are any vulnerabilities found, a new patched image will be generated with tag <originaltag>-patched or <originaltag>-x based on the configured tag-convention.")
 				if csscParams.filterPolicy == "" && csscParams.filterfilePath == "" {
 					return errors.New("flag --filter-policy or --filter-policy-file is required when using --dry-run")
 				} else if csscParams.filterfilePath != "" {
-					fmt.Println("Reading filter from filter file path...")
+					log.Info().Msg("Reading filter from filter file path...")
 					filter, err = cssc.GetFilterFromFilePath(csscParams.filterfilePath)
 					if err != nil {
 						return err
 					}
 				} else if csscParams.filterPolicy != "" {
-					fmt.Println("Reading filter from filter policy...")
+					log.Info().Msg("Reading filter from filter policy...")
 					filter, err = cssc.GetFilterFromFilterPolicy(ctx, csscParams.filterPolicy, loginURL, csscParams.username, csscParams.password)
 					if err != nil {
 						return err
@@ -120,7 +121,7 @@ func newPatchFilterCmd(csscParams *csscParameters) *cobra.Command {
 				return err
 			}
 
-			fmt.Println("Configured Tag Convention: ", filter.TagConvention)
+			log.Info().Str(logger.FieldTagConvention, string(filter.TagConvention)).Msg("Configured Tag Convention")
 			filteredResult, artifactsNotFound, err := cssc.ApplyFilterAndGetFilteredList(ctx, acrClient, filter)
 			if err != nil {
 				return err

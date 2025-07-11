@@ -4,8 +4,7 @@
 package main
 
 import (
-	"fmt"
-
+	"github.com/Azure/acr-cli/internal/logger"
 	"github.com/Azure/acr-cli/version"
 	"github.com/spf13/cobra"
 )
@@ -22,8 +21,11 @@ func newVersionCmd() *cobra.Command {
 		Short: "Print version information",
 		Long:  versionLongMessage,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			fmt.Printf(`Version: %s, Revision: %s
-`, version.Version, version.Revision)
+			log := logger.Get()
+			log.Info().
+				Str("version", version.Version).
+				Str("revision", version.Revision).
+				Msg("ACR CLI version information")
 			return nil
 		},
 	}

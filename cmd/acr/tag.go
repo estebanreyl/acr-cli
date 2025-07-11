@@ -5,9 +5,9 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/Azure/acr-cli/internal/api"
+	"github.com/Azure/acr-cli/internal/logger"
 	"github.com/Azure/acr-cli/internal/tag"
 	"github.com/spf13/cobra"
 )
@@ -60,6 +60,8 @@ func newTagListCmd(tagParams *tagParameters) *cobra.Command {
 		Short: "List tags from a repository",
 		Long:  newTagListCmdLongMessage,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			log := logger.Get().With().Str(logger.FieldRepository, tagParams.repoName).Logger()
+
 			registryName, err := tagParams.GetRegistryName()
 			if err != nil {
 				return err
@@ -75,9 +77,13 @@ func newTagListCmd(tagParams *tagParameters) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Listing tags for the %q repository:\n", tagParams.repoName)
+
+			log.Info().Int("tag_count", len(tagList)).Msg("Listing tags for repository")
 			for _, tag := range tagList {
-				fmt.Printf("%s/%s:%s\n", loginURL, tagParams.repoName, *tag.Name)
+				log.Info().
+					Str("login_url", loginURL).
+					Str("tag", *tag.Name).
+					Msg("Tag found")
 			}
 
 			return nil
