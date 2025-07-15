@@ -70,13 +70,22 @@ The ACR CLI supports the following global flags that can be used with any comman
 #### Structured Logging Flags
 
 - `--log-level` (debug, info, warn, error) - Controls the verbosity of log output. Defaults to `info`.
-- `--log-format` (console, json) - Controls the output format of logs. Defaults to `console` for better CLI usability.
+- `--log-format` (console, plaintext, json) - Controls the output format of logs. Defaults to `plaintext` for clean output that's ideal for piping to files.
+  - `console`: Human-readable format with colors and formatting
+  - `plaintext`: Human-readable format without colors (good for piping to files)
+  - `json`: Machine-readable JSON format
 
 **Examples:**
 
 ```sh
 # Enable debug logging for troubleshooting
 acr --log-level debug purge -r myregistry --filter "repo:.*" --ago 7d
+
+# Use console format for colored output
+acr --log-format console purge -r myregistry --filter "repo:.*" --ago 7d
+
+# Use plaintext format for clean output (default, good for piping)
+acr --log-format plaintext purge -r myregistry --filter "repo:.*" --ago 7d > operation.log
 
 # Use JSON format for log aggregation systems  
 acr --log-format json purge -r myregistry --filter "repo:.*" --ago 7d
