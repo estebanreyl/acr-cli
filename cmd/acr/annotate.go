@@ -91,7 +91,7 @@ func newAnnotateCmd(rootParams *rootParameters) *cobra.Command {
 			}
 			// A clarification message for --dry-run.
 			if annotateParams.dryRun {
-				log.Info().Msg("DRY RUN: The following output shows what WOULD be annotated if the annotate command was executed. Nothing is annotated.")
+				log.Info().Bool(logger.FieldDryRun, true).Msg("DRY RUN: The following output shows what WOULD be annotated if the annotate command was executed. Nothing is annotated.")
 			}
 			// In order to print a summary of the annotated tags/manifests, the counters get updated every time a repo is annotated.
 			annotatedTagsCount := 0
@@ -170,7 +170,7 @@ func annotateTags(ctx context.Context,
 	if !dryRun {
 		log.Info().Msg("Starting tag annotation for repository")
 	} else {
-		log.Info().Bool(logger.FieldDryRun, true).Msg("Dry run: would annotate tags for repository")
+		log.Info().Bool(logger.FieldDryRun, true).Msg("Would annotate tags for repository")
 	}
 
 	tagRegex, err := common.BuildRegexFilter(tagFilter, regexpMatchTimeoutSeconds)
@@ -266,11 +266,11 @@ func getManifestsToAnnotate(ctx context.Context,
 					// Only log what would be annotated during a dry-run. Successfully annotated manifests
 					// will be logged after the annotation.
 					if dryRun {
-						log.Debug().
+						log.Info().
 							Str(logger.FieldTag, *tag.Name).
 							Str(logger.FieldManifest, *tag.Digest).
 							Bool(logger.FieldDryRun, true).
-							Msg("Tag marked for annotation in dry run")
+							Msg("Tag marked for annotation")
 					}
 					manifestsToAnnotate = append(manifestsToAnnotate, *tag.Digest)
 				}
@@ -298,7 +298,7 @@ func annotateUntaggedManifests(ctx context.Context,
 	if !dryRun {
 		log.Info().Msg("Starting manifest annotation for repository")
 	} else {
-		log.Info().Bool(logger.FieldDryRun, true).Msg("Dry run: would annotate manifests for repository")
+		log.Info().Bool(logger.FieldDryRun, true).Msg("Would annotate manifests for repository")
 	}
 
 	// Contrary to getTagsToAnnotate, getManifests gets all the manifests at once.

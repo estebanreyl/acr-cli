@@ -298,22 +298,15 @@ func PrintFilteredResult(filteredResult []FilteredRepository, showPatchTags bool
 		log.Info().Msg("No matching repository and tag found")
 	} else if showPatchTags {
 		log.Info().Msg("Listing repositories and tags matching the filter with corresponding latest patch tag (if present)")
-		log.Info().Str("format", "Repo,Tag,LatestPatchTag").Msg("CSV Header")
 		for _, result := range filteredResult {
 			log.Info().
 				Str(logger.FieldRepository, result.Repository).
 				Str(logger.FieldTag, result.Tag).
-				Str("patch_tag", result.PatchTag).
+				Str(logger.FieldPatchTag, result.PatchTag).
 				Msg("Match found with patch tag")
-			log.Debug().
-				Str("repository", result.Repository).
-				Str("tag", result.Tag).
-				Str("patch_tag", result.PatchTag).
-				Msg("Repository result with patch tag")
 		}
 	} else {
 		log.Info().Msg("Listing repositories and tags matching the filter")
-		log.Info().Str("format", "Repo,Tag").Msg("CSV Header")
 		for _, result := range filteredResult {
 			log.Info().
 				Str(logger.FieldRepository, result.Repository).
@@ -327,20 +320,18 @@ func PrintFilteredResult(filteredResult []FilteredRepository, showPatchTags bool
 // Prints the artifacts not found to the console
 func PrintNotFoundArtifacts(artifactsNotFound []FilteredRepository) {
 	log := logger.Get().With().
-		Int("not_found_count", len(artifactsNotFound)).
+		Int(logger.FieldNotFoundCount, len(artifactsNotFound)).
 		Logger()
 
 	if len(artifactsNotFound) > 0 {
 		log.Warn().Msg("Some artifacts specified in filter were not found")
-		log.Info().Msg("Artifacts specified in the filter that do not exist")
-		log.Info().Str("format", "Repo,Tag").Msg("CSV Header")
 		for _, result := range artifactsNotFound {
 			log.Warn().
 				Str(logger.FieldRepository, result.Repository).
 				Str(logger.FieldTag, result.Tag).
 				Msg("Artifact not found")
 		}
-		log.Info().Int("not_found_count", len(artifactsNotFound)).Msg("Summary of not found artifacts")
+		log.Info().Int(logger.FieldNotFoundCount, len(artifactsNotFound)).Msg("Summary of not found artifacts")
 	} else {
 		log.Debug().Msg("All specified artifacts were found")
 	}

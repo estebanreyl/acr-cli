@@ -78,11 +78,11 @@ func newTagListCmd(tagParams *tagParameters) *cobra.Command {
 				return err
 			}
 
-			log.Info().Int("tag_count", len(tagList)).Msg("Listing tags for repository")
+			log.Info().Int(logger.FieldTagCount, len(tagList)).Msg("Listing tags for repository")
 			for _, tag := range tagList {
 				log.Info().
-					Str("login_url", loginURL).
-					Str("tag", *tag.Name).
+					Str(logger.FieldLoginURL, loginURL).
+					Str(logger.FieldTag, *tag.Name).
 					Msg("Tag found")
 			}
 

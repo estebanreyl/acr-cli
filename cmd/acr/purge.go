@@ -108,7 +108,7 @@ func newPurgeCmd(rootParams *rootParameters) *cobra.Command {
 			}
 			// A clarification message for --dry-run.
 			if purgeParams.dryRun {
-				log.Info().Msg("DRY RUN: The following output shows what WOULD be deleted if the purge command was executed. Nothing is deleted.")
+				log.Info().Bool(logger.FieldDryRun, purgeParams.dryRun).Msg("DRY RUN: The following output shows what WOULD be deleted if the purge command was executed. Nothing is deleted.")
 			}
 
 			// The number of concurrent requests will be ultimately limited by what repoParallelism is set to. This value
@@ -116,10 +116,10 @@ func newPurgeCmd(rootParams *rootParameters) *cobra.Command {
 			repoParallelism := purgeParams.concurrency
 			if repoParallelism <= 0 {
 				repoParallelism = defaultPoolSize
-				log.Warn().Int("concurrency", defaultPoolSize).Msg("Specified concurrency value invalid. Set to default value")
+				log.Warn().Int(logger.FieldConcurrency, defaultPoolSize).Msg("Specified concurrency value invalid. Set to default value")
 			} else if repoParallelism > maxPoolSize {
 				repoParallelism = maxPoolSize
-				log.Warn().Int("concurrency", maxPoolSize).Msg("Specified concurrency value too large. Set to maximum value")
+				log.Warn().Int(logger.FieldConcurrency, maxPoolSize).Msg("Specified concurrency value too large. Set to maximum value")
 			}
 
 			deletedTagsCount, deletedManifestsCount, err := purge(ctx, acrClient, loginURL, repoParallelism, purgeParams.ago, purgeParams.keep, purgeParams.filterTimeout, purgeParams.untagged, tagFilters, purgeParams.dryRun)
@@ -130,11 +130,11 @@ func newPurgeCmd(rootParams *rootParameters) *cobra.Command {
 
 			// After all repos have been purged the summary is printed.
 			if purgeParams.dryRun {
-				log.Info().Int("deletedTagsCount", deletedTagsCount).Msg("Number of tags to be deleted")
-				log.Info().Int("deletedManifestsCount", deletedManifestsCount).Msg("Number of manifests to be deleted")
+				log.Info().Int(logger.FieldDeletedTagsCount, deletedTagsCount).Msg("Number of tags to be deleted")
+				log.Info().Int(logger.FieldDeletedManifestsCount, deletedManifestsCount).Msg("Number of manifests to be deleted")
 			} else {
-				log.Info().Int("deletedTagsCount", deletedTagsCount).Msg("Number of deleted tags")
-				log.Info().Int("deletedManifestsCount", deletedManifestsCount).Msg("Number of deleted manifests")
+				log.Info().Int(logger.FieldDeletedTagsCount, deletedTagsCount).Msg("Number of deleted tags")
+				log.Info().Int(logger.FieldDeletedManifestsCount, deletedManifestsCount).Msg("Number of deleted manifests")
 			}
 
 			return err
@@ -226,7 +226,7 @@ func purgeTags(ctx context.Context, acrClient api.AcrCLIClientInterface, repoPar
 			for _, tag := range tagsToDelete {
 				manifestToTagsCountMap[*tag.Digest]++
 				if dryRun {
-					log.Info().Str("loginURL", loginURL).Str(logger.FieldTag, *tag.Name).Msg("Would delete tag (dry run)")
+					log.Info().Str(logger.FieldLoginURL, loginURL).Str(logger.FieldTag, *tag.Name).Msg("Would delete tag (dry run)")
 				}
 			}
 
@@ -367,14 +367,14 @@ func purgeDanglingManifests(ctx context.Context, acrClient api.AcrCLIClientInter
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("repository", repoName).
+			Str(logger.FieldRepository, repoName).
 			Msg("Failed to get untagged manifests")
 		return -1, err
 	}
 
 	log.Info().
-		Str("repository", repoName).
-		Int("candidate_count", len(manifestsToDelete)).
+		Str(logger.FieldRepository, repoName).
+		Int(logger.FieldCandidateCount, len(manifestsToDelete)).
 		Msg("Found candidate manifests for deletion")
 
 	// If dryRun is set to true then no manifests will be deleted, but the number of manifests that would be deleted is returned. Additionally,
@@ -382,19 +382,20 @@ func purgeDanglingManifests(ctx context.Context, acrClient api.AcrCLIClientInter
 	// filtering first as that would influence the untagged manifests that would be deleted.
 	if dryRun {
 		log.Info().
-			Int("count", len(manifestsToDelete)).
-			Msg("Dry run: manifests that would be deleted")
+			Bool(logger.FieldDryRun, dryRun).
+			Int(logger.FieldCandidateCount, len(manifestsToDelete)).
+			Msg("Manifests that would be deleted")
 
 		for _, manifest := range manifestsToDelete {
-			log.Info().Str("loginURL", loginURL).Str(logger.FieldManifest, manifest).Msg("Would delete manifest (dry run)")
+			log.Info().Str(logger.FieldLoginURL, loginURL).Str(logger.FieldManifest, manifest).Msg("Would delete manifest (dry run)")
 		}
 		return len(manifestsToDelete), nil
 	}
 
 	// In order to only have a limited amount of http requests, a purger is used that will start goroutines to delete manifests.
 	log.Debug().
-		Int("parallelism", repoParallelism).
-		Int("manifest_count", len(manifestsToDelete)).
+		Int(logger.FieldParallelism, repoParallelism).
+		Int(logger.FieldManifestCount, len(manifestsToDelete)).
 		Msg("Starting concurrent manifest deletion")
 
 	purger := worker.NewPurger(repoParallelism, acrClient, loginURL, repoName)
@@ -402,16 +403,16 @@ func purgeDanglingManifests(ctx context.Context, acrClient api.AcrCLIClientInter
 	if purgeErr != nil {
 		log.Error().
 			Err(purgeErr).
-			Str("repository", repoName).
-			Int("attempted_count", len(manifestsToDelete)).
+			Str(logger.FieldRepository, repoName).
+			Int(logger.FieldAttemptedCount, len(manifestsToDelete)).
 			Msg("Failed to purge manifests")
 		return -1, purgeErr
 	}
 
 	log.Info().
-		Str("repository", repoName).
-		Int("deleted_count", deletedManifestsCount).
-		Int("attempted_count", len(manifestsToDelete)).
+		Str(logger.FieldRepository, repoName).
+		Int(logger.FieldDeletedCount, deletedManifestsCount).
+		Int(logger.FieldAttemptedCount, len(manifestsToDelete)).
 		Msg("Successfully completed manifest purge operation")
 
 	return deletedManifestsCount, nil

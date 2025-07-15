@@ -54,11 +54,11 @@ func NewAnnotator(poolSize int, orasClient api.ORASClientInterface, loginURL str
 func (a *Annotator) Annotate(ctx context.Context, manifests []string) (int, error) {
 	log := logger.Get().With().
 		Str(logger.FieldRepository, a.repoName).
-		Int(logger.FieldManifestCount, len(manifests)).
-		Str(logger.FieldArtifactType, a.artifactType).
 		Logger()
 
-	log.Debug().
+	log.Info().
+		Int(logger.FieldManifestCount, len(manifests)).
+		Str(logger.FieldArtifactType, a.artifactType).
 		Interface("annotations", a.annotations).
 		Msg("Starting concurrent manifest annotation")
 
@@ -85,7 +85,6 @@ func (a *Annotator) Annotate(ctx context.Context, manifests []string) (int, erro
 				Str(logger.FieldManifest, digest).
 				Str(logger.FieldRef, ref).
 				Str(logger.FieldArtifactType, a.artifactType).
-				Interface("annotations", a.annotations).
 				Msg("Successfully annotated manifest")
 			return nil
 		})
@@ -95,7 +94,7 @@ func (a *Annotator) Annotate(ctx context.Context, manifests []string) (int, erro
 	finalCount := int(annotatedImages.Load())
 	log.Info().
 		Str(logger.FieldRepository, a.repoName).
-		Int("annotated_count", finalCount).
+		Int(logger.FieldAnnotatedCount, finalCount).
 		Int(logger.FieldAttemptedCount, len(manifests)).
 		Msg("Completed manifest annotation batch")
 
