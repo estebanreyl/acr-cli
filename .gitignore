@@ -2,7 +2,9 @@
 .vscode/
 .idea/
 /bin/
+/bin2/
 coverage.txt
 *.test
 *.out
 *.html
+acr-bin

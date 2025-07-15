@@ -10,6 +10,7 @@ import (
 
 	"github.com/Azure/acr-cli/cmd/common"
 	"github.com/Azure/acr-cli/internal/api"
+	"github.com/Azure/acr-cli/internal/logger"
 	"github.com/Azure/acr-cli/internal/worker"
 	"github.com/dlclark/regexp2"
 	"github.com/spf13/cobra"
@@ -63,6 +64,8 @@ func newAnnotateCmd(rootParams *rootParameters) *cobra.Command {
 		Long:    newAnnotateCmdLongMessage,
 		Example: annotateExampleMessage,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			log := logger.Get()
+
 			// This context is used for all the http requests
 			ctx := context.Background()
 			registryName, err := annotateParams.GetRegistryName()
@@ -88,7 +91,7 @@ func newAnnotateCmd(rootParams *rootParameters) *cobra.Command {
 			}
 			// A clarification message for --dry-run.
 			if annotateParams.dryRun {
-				fmt.Println("DRY RUN: The following output shows what WOULD be annotated if the annotate command was executed. Nothing is annotated.")
+				log.Info().Bool(logger.FieldDryRun, true).Msg("DRY RUN: The following output shows what WOULD be annotated if the annotate command was executed. Nothing is annotated.")
 			}
 			// In order to print a summary of the annotated tags/manifests, the counters get updated every time a repo is annotated.
 			annotatedTagsCount := 0
@@ -97,10 +100,10 @@ func newAnnotateCmd(rootParams *rootParameters) *cobra.Command {
 			poolSize := annotateParams.concurrency
 			if poolSize <= 0 {
 				poolSize = defaultPoolSize
-				fmt.Printf("Specified concurrency value invalid. Set to default value: %d \n", defaultPoolSize)
+				log.Warn().Int("concurrency", defaultPoolSize).Msg("Specified concurrency value invalid. Set to default value")
 			} else if poolSize > maxPoolSize {
 				poolSize = maxPoolSize
-				fmt.Printf("Specified concurrency value too large. Set to maximum value: %d \n", maxPoolSize)
+				log.Warn().Int("concurrency", maxPoolSize).Msg("Specified concurrency value too large. Set to maximum value")
 			}
 			for repoName, tagRegex := range tagFilters {
 				singleAnnotatedTagsCount, err := annotateTags(ctx, acrClient, orasClient, poolSize, loginURL, repoName, annotateParams.artifactType, annotateParams.annotations, tagRegex, annotateParams.filterTimeout, annotateParams.dryRun)
@@ -124,11 +127,11 @@ func newAnnotateCmd(rootParams *rootParameters) *cobra.Command {
 
 			// After all repos have been annotated, the summary is printed
 			if annotateParams.dryRun {
-				fmt.Printf("\nNumber of tags to be annotated: %d", annotatedTagsCount)
-				fmt.Printf("\nNumber of manifests to be annotated: %d\n", annotatedManifestsCount)
+				log.Info().Int("annotatedTagsCount", annotatedTagsCount).Msg("Number of tags to be annotated")
+				log.Info().Int("annotatedManifestsCount", annotatedManifestsCount).Msg("Number of manifests to be annotated")
 			} else {
-				fmt.Printf("\nNumber of annotated tags: %d", annotatedTagsCount)
-				fmt.Printf("\nNumber of annotated manifests: %d\n", annotatedManifestsCount)
+				log.Info().Int("annotatedTagsCount", annotatedTagsCount).Msg("Number of annotated tags")
+				log.Info().Int("annotatedManifestsCount", annotatedManifestsCount).Msg("Number of annotated manifests")
 			}
 			return nil
 		},
@@ -162,10 +165,12 @@ func annotateTags(ctx context.Context,
 	regexpMatchTimeoutSeconds int64,
 	dryRun bool) (int, error) {
 
+	log := logger.Get().With().Str(logger.FieldRepository, repoName).Logger()
+
 	if !dryRun {
-		fmt.Printf("\nAnnotating tags for repository: %s\n", repoName)
+		log.Info().Msg("Starting tag annotation for repository")
 	} else {
-		fmt.Printf("\nTags for this repository would be annotated: %s\n", repoName)
+		log.Info().Bool(logger.FieldDryRun, true).Msg("Would annotate tags for repository")
 	}
 
 	tagRegex, err := common.BuildRegexFilter(tagFilter, regexpMatchTimeoutSeconds)
@@ -222,10 +227,14 @@ func getManifestsToAnnotate(ctx context.Context,
 	filter *regexp2.Regexp,
 	lastTag string, artifactType string, dryRun bool) ([]string, string, error) {
 
+	log := logger.Get().With().Str(logger.FieldRepository, repoName).Logger()
+
 	resultTags, err := acrClient.GetAcrTags(ctx, repoName, "timedesc", lastTag)
 	if err != nil {
 		if resultTags != nil && resultTags.Response.Response != nil && resultTags.StatusCode == http.StatusNotFound {
-			fmt.Printf("%s repository not found\n", repoName)
+			log.Warn().
+				Int(logger.FieldStatusCode, resultTags.StatusCode).
+				Msg("Repository not found during annotation operation")
 			return nil, "", nil
 		}
 		return nil, "", err
@@ -254,10 +263,14 @@ func getManifestsToAnnotate(ctx context.Context,
 					return nil, "", err
 				}
 				if !skip {
-					// Only print what would be annotated during a dry-run. Successfully annotated manifests
+					// Only log what would be annotated during a dry-run. Successfully annotated manifests
 					// will be logged after the annotation.
 					if dryRun {
-						fmt.Printf("%s/%s:%s\n", loginURL, repoName, *tag.Name)
+						log.Info().
+							Str(logger.FieldTag, *tag.Name).
+							Str(logger.FieldManifest, *tag.Digest).
+							Bool(logger.FieldDryRun, true).
+							Msg("Tag marked for annotation")
 					}
 					manifestsToAnnotate = append(manifestsToAnnotate, *tag.Digest)
 				}
@@ -279,10 +292,13 @@ func annotateUntaggedManifests(ctx context.Context,
 	repoName string, artifactType string,
 	annotations []string,
 	dryRun bool) (int, error) {
+
+	log := logger.Get().With().Str(logger.FieldRepository, repoName).Logger()
+
 	if !dryRun {
-		fmt.Printf("Annotating manifests for repository: %s\n", repoName)
+		log.Info().Msg("Starting manifest annotation for repository")
 	} else {
-		fmt.Printf("Manifests for this repository would be annotated: %s\n", repoName)
+		log.Info().Bool(logger.FieldDryRun, true).Msg("Would annotate manifests for repository")
 	}
 
 	// Contrary to getTagsToAnnotate, getManifests gets all the manifests at once.

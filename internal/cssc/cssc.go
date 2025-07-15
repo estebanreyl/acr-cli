@@ -15,6 +15,7 @@ import (
 
 	"github.com/Azure/acr-cli/acr"
 	"github.com/Azure/acr-cli/internal/api"
+	"github.com/Azure/acr-cli/internal/logger"
 	"github.com/Azure/acr-cli/internal/tag"
 
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -136,7 +137,8 @@ func GetFilterFromFilePath(filePath string) (Filter, error) {
 
 // Validates the filter and returns an error if the filter is invalid
 func (filter *Filter) ValidateFilter() error {
-	fmt.Println("Validating filter...")
+	log := logger.Get()
+	log.Info().Msg("Validating filter")
 	const versionV1 = "v1"
 	if filter.Version == "" || filter.Version != versionV1 {
 		return errors.New("Version is required in the filter and should be " + versionV1)
@@ -285,33 +287,53 @@ func ApplyFilterAndGetFilteredList(ctx context.Context, acrClient api.AcrCLIClie
 
 // Prints the filtered result to the console
 func PrintFilteredResult(filteredResult []FilteredRepository, showPatchTags bool) {
+	log := logger.Get().With().
+		Int("result_count", len(filteredResult)).
+		Bool("show_patch_tags", showPatchTags).
+		Logger()
+
+	log.Info().Msg("Printing filtered repository results")
+
 	if len(filteredResult) == 0 {
-		fmt.Println("No matching repository and tag found!")
+		log.Info().Msg("No matching repository and tag found")
 	} else if showPatchTags {
-		fmt.Println("Listing repositories and tags matching the filter with corresponding latest patch tag (if present):")
-		fmt.Printf("%s,%s,%s\n", "Repo", "Tag", "LatestPatchTag")
+		log.Info().Msg("Listing repositories and tags matching the filter with corresponding latest patch tag (if present)")
 		for _, result := range filteredResult {
-			fmt.Printf("%s,%s,%s\n", result.Repository, result.Tag, result.PatchTag)
+			log.Info().
+				Str(logger.FieldRepository, result.Repository).
+				Str(logger.FieldTag, result.Tag).
+				Str(logger.FieldPatchTag, result.PatchTag).
+				Msg("Match found with patch tag")
 		}
 	} else {
-		fmt.Println("Listing repositories and tags matching the filter:")
-		fmt.Printf("%s,%s\n", "Repo", "Tag")
+		log.Info().Msg("Listing repositories and tags matching the filter")
 		for _, result := range filteredResult {
-			fmt.Printf("%s,%s\n", result.Repository, result.Tag)
+			log.Info().
+				Str(logger.FieldRepository, result.Repository).
+				Str(logger.FieldTag, result.Tag).
+				Msg("Match found")
 		}
 	}
-	fmt.Println("Matches found:", len(filteredResult))
+	log.Info().Int("matches_found", len(filteredResult)).Msg("Search completed")
 }
 
 // Prints the artifacts not found to the console
 func PrintNotFoundArtifacts(artifactsNotFound []FilteredRepository) {
+	log := logger.Get().With().
+		Int(logger.FieldNotFoundCount, len(artifactsNotFound)).
+		Logger()
+
 	if len(artifactsNotFound) > 0 {
-		fmt.Printf("%s\n", "Artifacts specified in the filter that do not exist:")
-		fmt.Printf("%s,%s\n", "Repo", "Tag")
+		log.Warn().Msg("Some artifacts specified in filter were not found")
 		for _, result := range artifactsNotFound {
-			fmt.Printf("%s,%s\n", result.Repository, result.Tag)
+			log.Warn().
+				Str(logger.FieldRepository, result.Repository).
+				Str(logger.FieldTag, result.Tag).
+				Msg("Artifact not found")
 		}
-		fmt.Println("Not found:", len(artifactsNotFound))
+		log.Info().Int(logger.FieldNotFoundCount, len(artifactsNotFound)).Msg("Summary of not found artifacts")
+	} else {
+		log.Debug().Msg("All specified artifacts were found")
 	}
 }
 

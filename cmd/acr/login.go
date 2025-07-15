@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/Azure/acr-cli/auth/oras"
+	"github.com/Azure/acr-cli/internal/logger"
 	"github.com/moby/term"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -66,6 +67,7 @@ func newLoginCmd() *cobra.Command {
 }
 
 func runLogin(opts loginOpts) error {
+	log := logger.Get()
 	if opts.debug {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
@@ -120,7 +122,7 @@ func runLogin(opts loginOpts) error {
 		return err
 	}
 
-	fmt.Println("Login Succeeded")
+	log.Info().Msg("Login Succeeded")
 	return nil
 }
 
