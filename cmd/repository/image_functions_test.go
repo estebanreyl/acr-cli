@@ -542,6 +542,78 @@ func TestGetUntaggedManifestsWithAgeCriteria(t *testing.T) {
 	})
 }
 
+func TestIsLiteralRegex(t *testing.T) {
+	tests := []struct {
+		pattern  string
+		expected bool
+	}{
+		{"myrepo", true},
+		{"my-repo/sub-repo", true},
+		{"repo123", true},
+		{"my.repo", false},
+		{"repo*", false},
+		{"repo+", false},
+		{"repo?", false},
+		{"(repo)", false},
+		{"[repo]", false},
+		{`repo\d`, false},
+		{"repo|other", false},
+		{"^repo", false},
+		{"repo$", false},
+		{"repo{1}", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.pattern, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isLiteralRegex(tt.pattern))
+		})
+	}
+}
+
+func TestCollectTagFiltersLiteralSkipsRepoListing(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Literal repo name skips GetAllRepositoryNames", func(t *testing.T) {
+		mockClient := &mocks.BaseClientAPI{}
+		// No GetRepositories expectation set — if called, mock will fail.
+		filters := []string{"myrepo:.*"}
+		result, err := CollectTagFilters(ctx, filters, mockClient, 60, 100)
+		assert.NoError(t, err)
+		assert.Equal(t, map[string]string{"myrepo": ".*"}, result)
+		mockClient.AssertExpectations(t)
+	})
+
+	t.Run("Regex repo name calls GetAllRepositoryNames", func(t *testing.T) {
+		mockClient := &mocks.BaseClientAPI{}
+		pageSize := int32(100)
+		names := []string{"repo-a", "repo-b"}
+		mockClient.On("GetRepositories", ctx, "", &pageSize).Return(acr.Repositories{Names: &names}, nil).Once()
+		mockClient.On("GetRepositories", ctx, "repo-b", &pageSize).Return(acr.Repositories{}, nil).Once()
+
+		filters := []string{"repo-.*:latest"}
+		result, err := CollectTagFilters(ctx, filters, mockClient, 60, pageSize)
+		assert.NoError(t, err)
+		assert.Equal(t, map[string]string{"repo-a": "latest", "repo-b": "latest"}, result)
+		mockClient.AssertExpectations(t)
+	})
+
+	t.Run("Mixed literal and regex filters", func(t *testing.T) {
+		mockClient := &mocks.BaseClientAPI{}
+		pageSize := int32(100)
+		names := []string{"alpha", "beta", "gamma"}
+		mockClient.On("GetRepositories", ctx, "", &pageSize).Return(acr.Repositories{Names: &names}, nil).Once()
+		mockClient.On("GetRepositories", ctx, "gamma", &pageSize).Return(acr.Repositories{}, nil).Once()
+
+		filters := []string{"alpha:v1", "bet.*:v2"}
+		result, err := CollectTagFilters(ctx, filters, mockClient, 60, pageSize)
+		assert.NoError(t, err)
+		assert.Equal(t, "v1", result["alpha"])
+		assert.Equal(t, "v2", result["beta"])
+		_, hasGamma := result["gamma"]
+		assert.False(t, hasGamma)
+		mockClient.AssertExpectations(t)
+	})
+}
+
 // Helper types and functions for testing
 
 type manifestTestData struct {

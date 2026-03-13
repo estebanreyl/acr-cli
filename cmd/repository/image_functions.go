@@ -101,29 +101,61 @@ func GetRepositoryAndTagRegex(filter string) (string, string, error) {
 	return repoAndRegex[0], repoAndRegex[1], nil
 }
 
+// isLiteralRegex returns true if the pattern contains no regex metacharacters
+// and therefore can only match itself as a literal string.
+func isLiteralRegex(pattern string) bool {
+	return regexp2.Escape(pattern) == pattern
+}
+
 // CollectTagFilters collects all matching repos and collects the associated tag filters
 func CollectTagFilters(ctx context.Context, rawFilters []string, client acrapi.BaseClientAPI, regexMatchTimeout int64, repoPageSize int32) (map[string]string, error) {
-	allRepoNames, err := GetAllRepositoryNames(ctx, client, repoPageSize)
-	if err != nil {
-		return nil, err
+	type parsedFilter struct {
+		repoRegex string
+		tagRegex  string
+		literal   bool
 	}
 
-	tagFilters := map[string]string{}
+	parsed := make([]parsedFilter, 0, len(rawFilters))
+	needRepoList := false
 	for _, filter := range rawFilters {
 		repoRegex, tagRegex, err := GetRepositoryAndTagRegex(filter)
 		if err != nil {
 			return nil, err
 		}
-		repoNames, err := GetMatchingRepos(allRepoNames, "^"+repoRegex+"$", regexMatchTimeout)
+		literal := isLiteralRegex(repoRegex)
+		if !literal {
+			needRepoList = true
+		}
+		parsed = append(parsed, parsedFilter{repoRegex: repoRegex, tagRegex: tagRegex, literal: literal})
+	}
+
+	var allRepoNames []string
+	if needRepoList {
+		var err error
+		allRepoNames, err = GetAllRepositoryNames(ctx, client, repoPageSize)
 		if err != nil {
 			return nil, err
+		}
+	}
+
+	tagFilters := map[string]string{}
+	for _, pf := range parsed {
+		var repoNames []string
+		if pf.literal {
+			repoNames = []string{pf.repoRegex}
+		} else {
+			var err error
+			repoNames, err = GetMatchingRepos(allRepoNames, "^"+pf.repoRegex+"$", regexMatchTimeout)
+			if err != nil {
+				return nil, err
+			}
 		}
 		for _, repoName := range repoNames {
 			if _, ok := tagFilters[repoName]; ok {
 				// To only iterate through a repo once a big regex filter is made of all the filters of a particular repo.
-				tagFilters[repoName] = tagFilters[repoName] + "|" + tagRegex
+				tagFilters[repoName] = tagFilters[repoName] + "|" + pf.tagRegex
 			} else {
-				tagFilters[repoName] = tagRegex
+				tagFilters[repoName] = pf.tagRegex
 			}
 		}
 	}

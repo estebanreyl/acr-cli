@@ -598,8 +598,7 @@ func TestCollectTagFilters(t *testing.T) {
 	t.Run("SingleRepo", func(t *testing.T) {
 		assert := assert.New(t)
 		mockClient := &mocks.BaseClientAPI{}
-		mockClient.On("GetRepositories", mock.Anything, "", mock.Anything).Return(ManyRepositoriesResult, nil).Once()
-		mockClient.On("GetRepositories", mock.Anything, mock.Anything, mock.Anything).Return(NoRepositoriesResult, nil).Once()
+		// "bar" is a literal repo name, so GetRepositories should not be called.
 		filters, err := repository.CollectTagFilters(testCtx, []string{testRepo + ":.*"}, mockClient, 60, defaultRepoPageSize)
 		assert.Equal(1, len(filters), "Number of found should be one")
 		assert.Equal(".*", filters[testRepo], "Filter for test repo should be .*")
@@ -623,10 +622,11 @@ func TestCollectTagFilters(t *testing.T) {
 	t.Run("NoPartialMatch", func(t *testing.T) {
 		assert := assert.New(t)
 		mockClient := &mocks.BaseClientAPI{}
-		mockClient.On("GetRepositories", mock.Anything, "", mock.Anything).Return(ManyRepositoriesResult, nil).Once()
-		mockClient.On("GetRepositories", mock.Anything, mock.Anything, mock.Anything).Return(NoRepositoriesResult, nil).Once()
+		// "ba" is a literal repo name, so GetRepositories should not be called.
+		// The literal name "ba" is used directly without verifying against the registry.
 		filters, err := repository.CollectTagFilters(testCtx, []string{"ba:.*"}, mockClient, 60, defaultRepoPageSize)
-		assert.Equal(0, len(filters), "Number of found repos should be zero")
+		assert.Equal(1, len(filters), "Literal repo name should be passed through")
+		assert.Equal(".*", filters["ba"], "Filter for ba repo should be .*")
 		assert.Equal(nil, err, "Error should be nil")
 		mockClient.AssertExpectations(t)
 	})
@@ -634,8 +634,7 @@ func TestCollectTagFilters(t *testing.T) {
 	t.Run("NameWithSlash", func(t *testing.T) {
 		assert := assert.New(t)
 		mockClient := &mocks.BaseClientAPI{}
-		mockClient.On("GetRepositories", mock.Anything, "", mock.Anything).Return(ManyRepositoriesResult, nil).Once()
-		mockClient.On("GetRepositories", mock.Anything, mock.Anything, mock.Anything).Return(NoRepositoriesResult, nil).Once()
+		// "foo/bar" is a literal repo name, so GetRepositories should not be called.
 		filters, err := repository.CollectTagFilters(testCtx, []string{"foo/bar:.*"}, mockClient, 60, defaultRepoPageSize)
 		assert.Equal(1, len(filters), "Number of found repos should be one")
 		assert.Equal(nil, err, "Error should be nil")
@@ -645,8 +644,7 @@ func TestCollectTagFilters(t *testing.T) {
 	t.Run("NameWithSlashAndNonCaptureGroupInTag", func(t *testing.T) {
 		assert := assert.New(t)
 		mockClient := &mocks.BaseClientAPI{}
-		mockClient.On("GetRepositories", mock.Anything, "", mock.Anything).Return(ManyRepositoriesResult, nil).Once()
-		mockClient.On("GetRepositories", mock.Anything, mock.Anything, mock.Anything).Return(NoRepositoriesResult, nil).Once()
+		// "foo/bar" is a literal repo name, so GetRepositories should not be called.
 		filters, err := repository.CollectTagFilters(testCtx, []string{"foo/bar:(?:.*)"}, mockClient, 60, defaultRepoPageSize)
 		assert.Equal(1, len(filters), "Number of found repos should be one")
 		assert.Equal(nil, err, "Error should be nil")
@@ -700,9 +698,11 @@ func TestCollectTagFilters(t *testing.T) {
 	t.Run("NoRepos", func(t *testing.T) {
 		assert := assert.New(t)
 		mockClient := &mocks.BaseClientAPI{}
-		mockClient.On("GetRepositories", mock.Anything, "", mock.Anything).Return(NoRepositoriesResult, nil).Once()
+		// "bar" is a literal repo name, so GetRepositories should not be called.
+		// The literal name is used directly without verifying against the registry.
 		filters, err := repository.CollectTagFilters(testCtx, []string{testRepo + ":.*"}, mockClient, 60, defaultRepoPageSize)
-		assert.Equal(0, len(filters), "Number of found repos should be zero")
+		assert.Equal(1, len(filters), "Literal repo name should be passed through")
+		assert.Equal(".*", filters[testRepo], "Filter for test repo should be .*")
 		assert.Equal(nil, err, "Error should be nil")
 		mockClient.AssertExpectations(t)
 	})
@@ -710,8 +710,7 @@ func TestCollectTagFilters(t *testing.T) {
 	t.Run("EmptyRepoRegex", func(t *testing.T) {
 		assert := assert.New(t)
 		mockClient := &mocks.BaseClientAPI{}
-		mockClient.On("GetRepositories", mock.Anything, "", mock.Anything).Return(ManyRepositoriesResult, nil).Once()
-		mockClient.On("GetRepositories", mock.Anything, mock.Anything, mock.Anything).Return(NoRepositoriesResult, nil).Once()
+		// Parsing fails before any repo listing happens.
 		_, err := repository.CollectTagFilters(testCtx, []string{":.*"}, mockClient, 60, defaultRepoPageSize)
 		assert.NotEqual(nil, err, "Error should not be nil")
 		mockClient.AssertExpectations(t)
@@ -720,8 +719,7 @@ func TestCollectTagFilters(t *testing.T) {
 	t.Run("EmptyTagRegex", func(t *testing.T) {
 		assert := assert.New(t)
 		mockClient := &mocks.BaseClientAPI{}
-		mockClient.On("GetRepositories", mock.Anything, "", mock.Anything).Return(ManyRepositoriesResult, nil).Once()
-		mockClient.On("GetRepositories", mock.Anything, mock.Anything, mock.Anything).Return(NoRepositoriesResult, nil).Once()
+		// Parsing fails before any repo listing happens.
 		_, err := repository.CollectTagFilters(testCtx, []string{testRepo + ".*:"}, mockClient, 60, defaultRepoPageSize)
 		assert.NotEqual(nil, err, "Error should not be nil")
 		mockClient.AssertExpectations(t)
