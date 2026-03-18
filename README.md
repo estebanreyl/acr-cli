@@ -132,6 +132,34 @@ Examples of filters
 | Clean only untagged manifests in all repos (with --untagged)                        | --filter `".*:^$"`                    |
 | Clean only untagged manifests in app repo (with --untagged)                         | --filter `"app:^$"`                   |
 
+##### Literal vs. regex repository names
+
+When the repository portion of a `--filter` is a plain name with no regex metacharacters (e.g. `my-repo:.*`), the CLI treats it as a **literal** repository name and targets that repository directly — **without listing the full catalog**. The catalog API is only called when at least one filter contains a regex pattern in the repository portion (e.g. `.*:.*` or `.*/cache:.*`).
+
+This has two practical benefits:
+
+- **Large registries:** Registries with a very large number of repositories can avoid the slow or impractical catalog listing step entirely by using literal repository names in their filters.
+- **Restricted permissions (ABAC):** In ABAC-enabled registries where a user only has access to specific repositories and lacks catalog listing permissions, literal filters allow `acr purge` to work without requiring the `Container Registry Repository Catalog Lister` role.
+
+For example, a user who only has access to `team-a/app` can run:
+
+```sh
+acr purge \
+    --registry <Registry Name> \
+    --filter "team-a/app:.*" \
+    --ago 30d
+```
+
+No catalog listing permission is needed because `team-a/app` is a literal name. Multiple literal filters can be combined to target several specific repositories:
+
+```sh
+acr purge \
+    --registry <Registry Name> \
+    --filter "team-a/app:.*" \
+    --filter "team-a/cache:.*" \
+    --ago 30d
+```
+
 
 #### Ago flag
 
@@ -262,7 +290,7 @@ acr purge \
 Registries with ABAC enabled use repository-scoped permissions instead of registry-wide roles. When using `acr purge` with an ABAC registry, keep the following in mind:
 
 **Required permissions:**
-- **Catalog listing:** The user must have permission to list repositories (e.g., the `Container Registry Repository Catalog Lister` role or equivalent `registry:catalog:*` scope).
+- **Catalog listing:** Required only when the `--filter` contains a regex pattern in the repository portion (e.g., `.*:.*`). If all filters use literal repository names (e.g., `my-repo:.*`), catalog listing is **not** required — see [Literal vs. regex repository names](#literal-vs-regex-repository-names) above.
 - **Repository access:** The user needs the `Container Registry Repository Contributor` role for deletes, which can be scoped to specific repositories using ABAC conditions.
 
 **Partial access behavior:**
