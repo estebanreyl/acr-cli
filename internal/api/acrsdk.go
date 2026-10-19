@@ -15,6 +15,7 @@ import (
 	// The autorest generated SDK is used, this file is just a wrapper to it.
 	acrapi "github.com/Azure/acr-cli/acr"
 	"github.com/Azure/acr-cli/auth/oras"
+	"github.com/Azure/acr-cli/internal/requestcount"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/golang-jwt/jwt/v4"
@@ -104,10 +105,14 @@ func newAcrCLIClientWithBasicAuth(loginURL string, username string, password str
 // wildcard is silently ignored by the server, so callers must use RefreshTokenForAbac to
 // request repository-specific scopes before accessing individual repositories.
 func newAcrCLIClientWithBearerAuth(loginURL string, refreshToken string) (AcrCLIClient, error) {
+	return newAcrCLIClientWithBearerAuthContext(context.Background(), loginURL, refreshToken)
+}
+
+func newAcrCLIClientWithBearerAuthContext(ctx context.Context, loginURL string, refreshToken string) (AcrCLIClient, error) {
 	newAcrCLIClient := newAcrCLIClient(loginURL)
+	newAcrCLIClient.AutorestClient.Sender = requestcount.WrapRegistry(ctx, newAcrCLIClient.AutorestClient.Sender)
 	newAcrCLIClient.isAbac = hasAadIdentityClaim(refreshToken)
 
-	ctx := context.Background()
 	scope := "registry:catalog:* repository:*:*"
 
 	accessTokenResponse, err := newAcrCLIClient.AutorestClient.GetAcrAccessToken(ctx, loginURL, scope, refreshToken)
@@ -131,6 +136,11 @@ func newAcrCLIClientWithBearerAuth(loginURL string, refreshToken string) (AcrCLI
 
 // GetAcrCLIClientWithAuth obtains a client that has authentication for making ACR http requests
 func GetAcrCLIClientWithAuth(loginURL string, username string, password string, configs []string) (*AcrCLIClient, error) {
+	return GetAcrCLIClientWithAuthContext(context.Background(), loginURL, username, password, configs)
+}
+
+// GetAcrCLIClientWithAuthContext includes initial registry authentication in per-run request counts.
+func GetAcrCLIClientWithAuthContext(ctx context.Context, loginURL string, username string, password string, configs []string) (*AcrCLIClient, error) {
 	if username == "" && password == "" {
 		// If both username and password are empty then the docker config file will be used, it can be found in the default
 		// location or in a location specified by the configs string array
@@ -138,7 +148,7 @@ func GetAcrCLIClientWithAuth(loginURL string, username string, password string, 
 		if err != nil {
 			return nil, errors.Wrap(err, "error resolving authentication")
 		}
-		cred, err := store.Credential(context.Background(), loginURL)
+		cred, err := store.Credential(ctx, loginURL)
 		if err != nil {
 			return nil, errors.Wrap(err, "error resolving authentication")
 		}
@@ -158,7 +168,7 @@ func GetAcrCLIClientWithAuth(loginURL string, username string, password string, 
 	if username == "" || username == "00000000-0000-0000-0000-000000000000" {
 		// If the username is empty an ACR refresh token was used.
 		var err error
-		acrClient, err = newAcrCLIClientWithBearerAuth(loginURL, password)
+		acrClient, err = newAcrCLIClientWithBearerAuthContext(ctx, loginURL, password)
 		if err != nil {
 			return nil, errors.Wrap(err, "error resolving authentication")
 		}
@@ -166,6 +176,7 @@ func GetAcrCLIClientWithAuth(loginURL string, username string, password string, 
 	}
 	// if both the username and password were specified basic authentication can be assumed.
 	acrClient = newAcrCLIClientWithBasicAuth(loginURL, username, password)
+	acrClient.AutorestClient.Sender = requestcount.WrapRegistry(ctx, acrClient.AutorestClient.Sender)
 	return &acrClient, nil
 }
 

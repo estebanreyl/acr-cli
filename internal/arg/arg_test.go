@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-package main
+package arg
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -206,7 +207,7 @@ func TestRejectInvalidModesAndAge(t *testing.T) {
 		{"--registry-id", testRegistry, "--discover", "--ago-days", "Inf"},
 		{"--registry-id", testRegistry, "--discover", "--ago-days", "1000000"},
 	} {
-		if err := run(args, io.Discard); err == nil {
+		if err := RunPrototype(context.Background(), args, io.Discard); err == nil {
 			t.Fatalf("invalid arguments accepted: %v", args)
 		}
 	}
@@ -229,10 +230,10 @@ func TestOfflineCommandOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output strings.Builder
-	if err := run([]string{"--registry-id", testRegistry, "--snapshot", path, "--ago-days", "7"}, &output); err != nil {
+	if err := RunPrototype(context.Background(), []string{"--registry-id", testRegistry, "--snapshot", path, "--ago-days", "7"}, &output); err != nil {
 		t.Fatal(err)
 	}
-	var result selection
+	var result Selection
 	if err := json.Unmarshal([]byte(output.String()), &result); err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +311,7 @@ func TestRejectAmbiguousOrIncompleteNativeRows(t *testing.T) {
 func TestReplayDiscoveryCapture(t *testing.T) {
 	image := testArtifact(1)
 	image.AgeTimestamp = "2020-01-01T00:00:00Z"
-	captured := discovery{
+	captured := Discovery{
 		Mode: "schema-discovery", RegistryID: testRegistry,
 		Data: []json.RawMessage{nativeArtifact(image, "Manifest",
 			`{"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.v2+json","layers":[]}`)},
@@ -324,10 +325,10 @@ func TestReplayDiscoveryCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output strings.Builder
-	if err := run([]string{"--registry-id", testRegistry, "--snapshot", path, "--ago-days", "7"}, &output); err != nil {
+	if err := RunPrototype(context.Background(), []string{"--registry-id", testRegistry, "--snapshot", path, "--ago-days", "7"}, &output); err != nil {
 		t.Fatal(err)
 	}
-	var result selection
+	var result Selection
 	if err := json.Unmarshal([]byte(output.String()), &result); err != nil {
 		t.Fatal(err)
 	}
@@ -335,5 +336,55 @@ func TestReplayDiscoveryCapture(t *testing.T) {
 		result.Candidates[0].AgeTimestamp != image.AgeTimestamp ||
 		result.AgeBasis != "ARG properties.registryArtifact.pushedAt (captured snapshot)" {
 		t.Fatalf("invalid discovery replay: %s", output.String())
+	}
+	output.Reset()
+	if err := RunPrototype(context.Background(), []string{"--registry", "testregistry.azurecr.io", "--snapshot", path, "--ago-days", "7"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(output.String()), &result); err != nil || result.RegistryID != testRegistry {
+		t.Fatalf("capture replay failed to infer its registry ID: %+v, err=%v", result, err)
+	}
+	if err := RunPrototype(context.Background(), []string{"--registry", "otherregistry", "--snapshot", path}, io.Discard); err == nil {
+		t.Fatal("capture replay accepted another registry name")
+	}
+}
+
+func TestEndpointSelectionAndValidation(t *testing.T) {
+	for _, tc := range []struct {
+		options Options
+		want    string
+	}{
+		{Options{RegistryID: testRegistry}, "https://southeastasia.management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2024-04-01"},
+		{Options{RegistryID: testRegistry, Region: "global"}, "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2024-04-01"},
+		{Options{RegistryID: testRegistry, Region: "westus", APIVersion: "2024-04-01-preview"}, "https://westus.management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2024-04-01-preview"},
+	} {
+		endpoint, err := tc.options.endpoint()
+		if err != nil || endpoint != tc.want {
+			t.Fatalf("endpoint=%q, err=%v; want %q", endpoint, err, tc.want)
+		}
+	}
+	for _, options := range []Options{
+		{RegistryID: "invalid"},
+		{RegistryID: testRegistry, Region: "https://elsewhere"},
+		{RegistryID: testRegistry, APIVersion: "2024-04-01&other=value"},
+		{},
+		{RegistryName: "testregistry' | take 1"},
+		{RegistryName: "testregistry.othercloud.example"},
+		{RegistryName: "otherregistry", RegistryID: testRegistry},
+		{RegistryName: "testregistry", SubscriptionID: "not-a-uuid"},
+		{RegistryID: testRegistry, SubscriptionID: "11111111-1111-1111-1111-111111111111"},
+	} {
+		if err := options.Validate(); err == nil {
+			t.Fatalf("invalid options accepted: %+v", options)
+		}
+	}
+}
+
+func TestCanceledDiscoveryDoesNotAuthenticate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := FindCandidates(ctx, Options{RegistryID: testRegistry}, testCutoff)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled discovery before authentication, got %v", err)
 	}
 }

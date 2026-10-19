@@ -18,6 +18,8 @@ import (
 	"github.com/Azure/acr-cli/acr"
 	"github.com/Azure/acr-cli/cmd/repository"
 	"github.com/Azure/acr-cli/internal/api"
+	"github.com/Azure/acr-cli/internal/arg"
+	"github.com/Azure/acr-cli/internal/requestcount"
 	"github.com/Azure/acr-cli/internal/worker"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/dlclark/regexp2"
@@ -49,6 +51,9 @@ const (
 
   - Clean up dangling manifests older than 3 days, keeping the 5 most recent
 	acr purge -r example --untagged-only --ago 3d --keep 5
+
+  EXPERIMENTAL ARG MANIFEST CACHE (dry-run only; requires registry and ARM credentials):
+	acr purge -r example --arg --untagged-only --ago 7d --dry-run
 
   ADVANCED OPTIONS:
   - Use custom authentication config
@@ -94,17 +99,26 @@ type purgeParameters struct {
 	concurrency   int
 	repoPageSize  int32
 	verbose       bool
+	useARG        bool
+	countRequests bool
+	argOptions    arg.Options
 }
 
 // newPurgeCmd defines the purge command.
 func newPurgeCmd(rootParams *rootParameters) *cobra.Command {
-	purgeParams := purgeParameters{rootParameters: rootParams}
+	return newPurgeCmdWithARGLoader(&purgeParameters{rootParameters: rootParams}, arg.LoadManifestCache)
+}
+
+func newPurgeCmdWithARGLoader(purgeParams *purgeParameters, loadARG argManifestLoader) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "purge",
 		Short:   "Delete images from a registry.",
 		Long:    newPurgeCmdLongMessage,
 		Example: purgeExampleMessage,
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := validateARGFlags(cmd, purgeParams); err != nil {
+				return err
+			}
 			// Validate flag combinations before authentication
 			// untagged-only mode: filter and ago are optional (skip validation)
 			// untagged mode and standard mode: both require filter and ago
@@ -132,13 +146,21 @@ func newPurgeCmd(rootParams *rootParameters) *cobra.Command {
 
 			// This context is used for all the http requests.
 			ctx := context.Background()
+			if purgeParams.useARG {
+				ctx = cmd.Context()
+			}
+			if purgeParams.countRequests {
+				var counter *requestcount.Counter
+				ctx, counter = requestcount.WithCounter(ctx)
+				defer func() { cmd.Println(counter.Summary()) }()
+			}
 			registryName, err := purgeParams.GetRegistryName()
 			if err != nil {
 				return err
 			}
 			loginURL := api.LoginURL(registryName)
 			// An acrClient with authentication is generated, if the authentication cannot be resolved an error is returned.
-			acrClient, err := api.GetAcrCLIClientWithAuth(loginURL, purgeParams.username, purgeParams.password, purgeParams.configs)
+			acrClient, err := api.GetAcrCLIClientWithAuthContext(ctx, loginURL, purgeParams.username, purgeParams.password, purgeParams.configs)
 			if err != nil {
 				return err
 			}
@@ -164,6 +186,23 @@ func newPurgeCmd(rootParams *rootParameters) *cobra.Command {
 				tagFilters = make(map[string]string)
 			}
 
+			var purgeClient api.AcrCLIClientInterface = acrClient
+			if purgeParams.useARG {
+				var cache *arg.ManifestCache
+				purgeClient, cache, err = prepareARGPurgeClient(ctx, acrClient, purgeParams.argOptions, tagFilters, loadARG)
+				if err != nil {
+					return err
+				}
+				cmd.Println("EXPERIMENTAL ARG HYBRID DRY RUN: Registry metadata determines current state; ARG supplies manifest bodies. Nothing is deleted.")
+				if cache != nil {
+					cmd.Printf("Registry ARM ID: %s\n", cache.RegistryID)
+					for _, warning := range cache.Warnings() {
+						cmd.PrintErrf("ARG body rejected; registry GET fallback will be used: %s\n", warning)
+					}
+					defer printARGCacheStats(cmd, cache)
+				}
+			}
+
 			// A clarification message for --dry-run.
 			if purgeParams.dryRun {
 				fmt.Println("DRY RUN: The following output shows what WOULD be deleted if the purge command was executed. Nothing is deleted.")
@@ -183,7 +222,7 @@ func newPurgeCmd(rootParams *rootParameters) *cobra.Command {
 			// Combine flags for clarity - these are mutually exclusive
 			supportUntaggedCleanup := purgeParams.untagged || purgeParams.untaggedOnly
 
-			deletedTagsCount, deletedManifestsCount, err := purge(ctx, acrClient, loginURL, repoParallelism, agoDuration, purgeParams.keep, purgeParams.filterTimeout, supportUntaggedCleanup, purgeParams.untaggedOnly, tagFilters, purgeParams.dryRun, purgeParams.includeLocked, purgeParams.verbose)
+			deletedTagsCount, deletedManifestsCount, err := purge(ctx, purgeClient, loginURL, repoParallelism, agoDuration, purgeParams.keep, purgeParams.filterTimeout, supportUntaggedCleanup, purgeParams.untaggedOnly, tagFilters, purgeParams.dryRun, purgeParams.includeLocked, purgeParams.verbose)
 
 			if err != nil && !strings.Contains(err.Error(), "insufficient permissions") {
 				fmt.Printf("Failed to complete purge: %v \n", err)
@@ -214,6 +253,12 @@ func newPurgeCmd(rootParams *rootParameters) *cobra.Command {
 	cmd.Flags().IntVar(&purgeParams.concurrency, "concurrency", defaultPoolSize, concurrencyDescription)
 	cmd.Flags().Int32Var(&purgeParams.repoPageSize, "repository-page-size", defaultRepoPageSize, repoPageSizeDescription)
 	cmd.Flags().BoolVar(&purgeParams.verbose, "verbose", false, "Enable verbose output including detailed repository names during ABAC token operations")
+	cmd.Flags().BoolVar(&purgeParams.countRequests, "debug-request-counts", false, "Temporary diagnostic: report registry and ARG HTTP attempts, including retries; excludes ARM credential acquisition and external processes")
+	cmd.Flags().BoolVar(&purgeParams.useARG, "arg", false, "Experimental ARG manifest-body cache; requires --dry-run and --untagged or --untagged-only. Uses registry metadata and ARM credentials, with counted registry GET fallbacks")
+	cmd.Flags().StringVar(&purgeParams.argOptions.RegistryID, "arg-registry-id", "", "Optional registry ARM resource ID override for --arg; otherwise resolved through ARG from --registry")
+	cmd.Flags().StringVar(&purgeParams.argOptions.SubscriptionID, "arg-subscription", "", "Optional subscription UUID to scope ARG registry discovery; otherwise queries subscriptions accessible to the ARM identity")
+	cmd.Flags().StringVar(&purgeParams.argOptions.Region, "arg-region", arg.DefaultRegion, "Regional ARM endpoint for --arg, or global")
+	cmd.Flags().StringVar(&purgeParams.argOptions.APIVersion, "arg-api-version", arg.DefaultAPIVersion, "Resource Graph API version for --arg")
 	cmd.Flags().BoolP("help", "h", false, "Print usage")
 	// Make filter and ago conditionally required based on untagged-only flag
 	cmd.MarkFlagsOneRequired("filter", "untagged-only")
