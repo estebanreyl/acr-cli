@@ -99,15 +99,11 @@ func newAcrCLIClientWithBasicAuth(loginURL string, username string, password str
 	return newAcrCLIClient
 }
 
-// newAcrCLIClientWithBearerAuth creates a client that uses bearer token authentication.
+// newAcrCLIClientWithBearerAuthContext creates a client that uses bearer token authentication.
 // It detects ABAC-enabled registries via the "aad_identity" claim in the refresh token.
 // It always requests both catalog and wildcard repository access; on ABAC registries the
 // wildcard is silently ignored by the server, so callers must use RefreshTokenForAbac to
 // request repository-specific scopes before accessing individual repositories.
-func newAcrCLIClientWithBearerAuth(loginURL string, refreshToken string) (AcrCLIClient, error) {
-	return newAcrCLIClientWithBearerAuthContext(context.Background(), loginURL, refreshToken)
-}
-
 func newAcrCLIClientWithBearerAuthContext(ctx context.Context, loginURL string, refreshToken string) (AcrCLIClient, error) {
 	newAcrCLIClient := newAcrCLIClient(loginURL)
 	newAcrCLIClient.AutorestClient.Sender = requestcount.WrapRegistry(ctx, newAcrCLIClient.AutorestClient.Sender)

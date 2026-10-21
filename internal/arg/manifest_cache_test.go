@@ -27,7 +27,7 @@ func testManifestCache(t *testing.T, rows ...json.RawMessage) *ManifestCache {
 
 func TestManifestCachePreservesChildrenAndSubjectsWithoutTagHistory(t *testing.T) {
 	parent, child, subject := testArtifact(1), testArtifact(2), testArtifact(3)
-	body := fmt.Sprintf(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"digest":%q}],"subject":{"digest":%q}}`,
+	body := fmt.Sprintf(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":%q}],"subject":{"digest":%q}}`,
 		child.Digest, subject.Digest)
 	cache := testManifestCache(t, nativeArtifact(parent, "Manifest", body))
 	fallback := func(context.Context, string, string) ([]byte, error) {
@@ -46,11 +46,21 @@ func TestManifestCachePreservesChildrenAndSubjectsWithoutTagHistory(t *testing.T
 }
 
 func TestManifestCacheMissingAndInvalidBodiesUseCountedFallback(t *testing.T) {
+	childDigest := testArtifact(2).Digest
 	for name, body := range map[string]string{
-		"malformed":   `"not a manifest object"`,
-		"unsupported": `{"schemaVersion":2,"mediaType":"unknown"}`,
-		"truncated":   `{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json"}`,
-		"bad child":   `{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"digest":"bad"}]}`,
+		"malformed":      `"not a manifest object"`,
+		"missing body":   "null",
+		"missing layers": `{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json"}`,
+		"unsupported":    `{"schemaVersion":2,"mediaType":"unknown"}`,
+		"truncated":      `{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json"}`,
+		"bad child":      `{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"digest":"bad"}]}`,
+		"bad subject":    `{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","layers":[],"subject":{"digest":"bad"}}`,
+		"missing child media type": fmt.Sprintf(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"digest":%q}]}`,
+			childDigest),
+		"empty child media type": fmt.Sprintf(`{"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.list.v2+json","manifests":[{"mediaType":"","digest":%q}]}`,
+			childDigest),
+		"blank child media type": fmt.Sprintf(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"mediaType":" ","digest":%q}]}`,
+			childDigest),
 	} {
 		t.Run(name, func(t *testing.T) {
 			row := testArtifact(1)

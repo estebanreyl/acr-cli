@@ -112,16 +112,8 @@ func TestNativeHTTPDiscoveryAndPaginationWithoutCLI(t *testing.T) {
 		!reflect.DeepEqual(credential.scopes, []string{"https://management.azure.com/.default"}) {
 		t.Fatalf("incorrect discovery or ARM token scope: %+v", requests)
 	}
-	rows, err := normalizeArtifacts(captured.Data, captured.RegistryID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := selectCandidates(rows, captured.RegistryID, testCutoff)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.CandidateCount != 1 || result.Candidates[0].Digest != orphan.Digest {
-		t.Fatalf("native HTTP discovery lost relationships: %+v", result)
+	if !reflect.DeepEqual(captured.Data, raw) {
+		t.Fatalf("native HTTP discovery changed raw records: %+v", captured.Data)
 	}
 }
 
@@ -239,7 +231,7 @@ func TestRegistryLookupFailsClosed(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			requests := 0
-			c := testHTTPClient(t, &testCredential{}, func(w http.ResponseWriter, r *http.Request) {
+			c := testHTTPClient(t, &testCredential{}, func(w http.ResponseWriter, _ *http.Request) {
 				requests++
 				if err := json.NewEncoder(w).Encode(page); err != nil {
 					t.Error(err)
@@ -254,7 +246,7 @@ func TestRegistryLookupFailsClosed(t *testing.T) {
 
 func TestHTTPAndCredentialErrorsAreNotHidden(t *testing.T) {
 	t.Run("ARM authorization", func(t *testing.T) {
-		c := testHTTPClient(t, &testCredential{}, func(w http.ResponseWriter, r *http.Request) {
+		c := testHTTPClient(t, &testCredential{}, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			fmt.Fprint(w, `{"error":{"code":"AuthorizationFailed","message":"denied"}}`)
@@ -267,7 +259,7 @@ func TestHTTPAndCredentialErrorsAreNotHidden(t *testing.T) {
 		}
 	})
 	t.Run("malformed response", func(t *testing.T) {
-		c := testHTTPClient(t, &testCredential{}, func(w http.ResponseWriter, r *http.Request) {
+		c := testHTTPClient(t, &testCredential{}, func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprint(w, "not json")
 		})
 		if _, err := c.discover(context.Background(), Options{RegistryName: "testregistry"}); err == nil ||
@@ -278,7 +270,7 @@ func TestHTTPAndCredentialErrorsAreNotHidden(t *testing.T) {
 	t.Run("credential failure", func(t *testing.T) {
 		expected := errors.New("test ARM authentication failed")
 		requests := 0
-		c := testHTTPClient(t, &testCredential{err: expected}, func(w http.ResponseWriter, r *http.Request) {
+		c := testHTTPClient(t, &testCredential{err: expected}, func(_ http.ResponseWriter, _ *http.Request) {
 			requests++
 		})
 		ctx, counter := requestcount.WithCounter(context.Background())
@@ -294,7 +286,7 @@ func TestHTTPAndCredentialErrorsAreNotHidden(t *testing.T) {
 
 func TestNativeClientRetriesThrottledQuery(t *testing.T) {
 	requests := 0
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
 		if requests == 1 {

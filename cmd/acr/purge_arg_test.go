@@ -198,8 +198,16 @@ func TestARGHybridPreservesTaggedNestedChildrenReferrersAndPlannedUntags(t *test
 			imageType, argFixtureDigest(4)),
 		argFixtureDigest(6): imageBody, // Indexed but absent from the live registry listing.
 	}
-	for _, untag := range []bool{false, true} {
-		t.Run(fmt.Sprintf("untag=%v", untag), func(t *testing.T) {
+	for _, tc := range []struct {
+		untag          bool
+		incompleteBody bool
+	}{
+		{},
+		{untag: true},
+		{incompleteBody: true},
+		{untag: true, incompleteBody: true},
+	} {
+		t.Run(fmt.Sprintf("untag=%v/incomplete=%v", tc.untag, tc.incompleteBody), func(t *testing.T) {
 			var baseline []string
 			for _, hybrid := range []bool{false, true} {
 				metadata := make([]acr.ManifestAttributesBase, 0, 5)
@@ -225,9 +233,18 @@ func TestARGHybridPreservesTaggedNestedChildrenReferrersAndPlannedUntags(t *test
 				empty := []acr.ManifestAttributesBase{}
 				client.On("GetAcrManifests", mock.Anything, "repo", "", argFixtureDigest(5)).
 					Return(&acr.Manifests{ManifestsAttributes: &empty}, nil).Once()
-				cache := argFixtureCache(t, bodies)
+				cachedBodies := make(map[string]string, len(bodies))
+				for digest, body := range bodies {
+					cachedBodies[digest] = body
+				}
+				if tc.incompleteBody {
+					cachedBodies[argFixtureDigest(1)] = fmt.Sprintf(
+						`{"schemaVersion":2,"mediaType":%q,"manifests":[{"digest":%q}]}`,
+						indexType, argFixtureDigest(2))
+				}
+				cache := argFixtureCache(t, cachedBodies)
 				planned := make(map[string]int)
-				if untag {
+				if tc.untag {
 					name, digest := "keep", argFixtureDigest(1)
 					tags := []acr.TagAttributesBase{{
 						Name: &name, Digest: &digest, LastUpdateTime: &old,
@@ -249,6 +266,9 @@ func TestARGHybridPreservesTaggedNestedChildrenReferrersAndPlannedUntags(t *test
 					for digest, body := range bodies {
 						client.On("GetManifest", mock.Anything, "repo", digest).Return([]byte(body), nil).Maybe()
 					}
+				} else if tc.incompleteBody {
+					client.On("GetManifest", mock.Anything, "repo", argFixtureDigest(1)).
+						Return([]byte(bodies[argFixtureDigest(1)]), nil).Once()
 				}
 				var manifests []acr.ManifestAttributesBase
 				var err error
@@ -271,15 +291,21 @@ func TestARGHybridPreservesTaggedNestedChildrenReferrersAndPlannedUntags(t *test
 				if !hybrid {
 					baseline = digests
 					want := []string{argFixtureDigest(4)}
-					if untag {
+					if tc.untag {
 						want = []string{argFixtureDigest(1), argFixtureDigest(2), argFixtureDigest(3), argFixtureDigest(4)}
 					}
 					if !reflect.DeepEqual(digests, want) {
 						t.Fatalf("unexpected baseline: %v", digests)
 					}
-				} else if !reflect.DeepEqual(digests, baseline) ||
-					cache.Stats().Hits == 0 || cache.Stats().MissingFallbacks != 0 || cache.Stats().InvalidFallbacks != 0 {
-					t.Fatalf("hybrid changed current-state protection: %v vs %v, %+v", digests, baseline, cache.Stats())
+				} else {
+					var invalidFallbacks uint64
+					if tc.incompleteBody {
+						invalidFallbacks = 1
+					}
+					if !reflect.DeepEqual(digests, baseline) || cache.Stats().Hits == 0 ||
+						cache.Stats().MissingFallbacks != 0 || cache.Stats().InvalidFallbacks != invalidFallbacks {
+						t.Fatalf("hybrid changed current-state protection: %v vs %v, %+v", digests, baseline, cache.Stats())
+					}
 				}
 				client.AssertExpectations(t)
 			}

@@ -104,7 +104,10 @@ entire operation into a registry-only run.
 
 Digest-addressed bodies are immutable, but indexed copies still need fidelity
 validation. The implementation does not cryptographically verify indexed
-bodies against their digests. Current-state listings are not an atomic
+bodies against their digests. Index/list child descriptors must have a valid
+digest and a nonempty media type; otherwise the body is rejected and fetched
+from the registry. Schema checks still cannot detect omitted children or
+subjects in otherwise valid bodies. Current-state listings are not an atomic
 snapshot across both services. Dry-run parity is useful evidence, not a
 deletion-safety guarantee.
 
@@ -449,5 +452,5 @@ not independently verify every indexed body or subject.
 The [investigation notes](arg-purge-integration.md) retain the original
 pure-ARG experiments, schema findings, limitations, and comparison details.
 They are historical evidence, not a replacement for this guide. The standalone
-pure-ARG prototype cannot establish current tag state and should not be used
-as a current-state cleanup plan.
+pure-ARG prototype and its historical-tag candidate selector have been removed.
+Use `acr purge --arg --dry-run` for the supported hybrid experiment.

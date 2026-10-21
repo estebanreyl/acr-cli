@@ -14,27 +14,32 @@ import (
 
 type contextKey struct{}
 
+// Counter tracks concurrent HTTP attempts by category.
 type Counter struct {
 	mu     sync.Mutex
 	counts map[string]uint64
 }
 
+// WithCounter attaches a new per-run counter to the context.
 func WithCounter(ctx context.Context) (context.Context, *Counter) {
 	counter := &Counter{counts: make(map[string]uint64)}
 	return context.WithValue(ctx, contextKey{}, counter), counter
 }
 
+// FromContext returns the attached counter, or nil when counting is disabled.
 func FromContext(ctx context.Context) *Counter {
 	counter, _ := ctx.Value(contextKey{}).(*Counter)
 	return counter
 }
 
+// Add records one attempt in the given category.
 func (c *Counter) Add(category string) {
 	c.mu.Lock()
 	c.counts[category]++
 	c.mu.Unlock()
 }
 
+// Summary formats the total and per-category request counts.
 func (c *Counter) Summary() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -47,6 +52,7 @@ func (c *Counter) Summary() string {
 		c.counts["manifest_metadata"], c.counts["manifest_get"], c.counts["registry_other"], c.counts["arg_queries"])
 }
 
+// Sender sends HTTP requests.
 type Sender interface {
 	Do(*http.Request) (*http.Response, error)
 }
@@ -56,6 +62,7 @@ type registrySender struct {
 	counter *Counter
 }
 
+// WrapRegistry counts registry requests when the context has a counter.
 func WrapRegistry(ctx context.Context, next Sender) Sender {
 	if counter := FromContext(ctx); counter != nil {
 		return &registrySender{next: next, counter: counter}

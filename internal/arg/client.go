@@ -181,6 +181,7 @@ func defaultClient(ctx context.Context, options Options) (*client, error) {
 	}), nil
 }
 
+// Discover retrieves raw artifact inventory without interpreting historical tags.
 func Discover(ctx context.Context, options Options) (Discovery, error) {
 	c, err := defaultClient(ctx, options)
 	if err != nil {

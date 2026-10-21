@@ -10,8 +10,9 @@ Draft / discussion notes. This doc assumes that ARG is enabled for an azure cont
 
 **Current implementation:** `acr purge --arg` is a dry-run-only hybrid.
 Registry metadata supplies current state; ARG supplies only manifest bodies.
-The original pure-ARG candidate selector and zero-registry-read integration
-below are historical experiments, not the current command path. See
+The standalone pure-ARG prototype and its candidate selector have been removed.
+Their commands, selection rules, and zero-registry-read integration below are
+historical records, not supported entry points. See
 [Approved Hybrid](#approved-hybrid-registry-state-and-arg-manifest-bodies).
 
 ## Background
@@ -138,12 +139,12 @@ This is the only edge connecting the two phases.
 
 ## Historical Read-Only Prototype: Basic Untagged Cleanup
 
-`scripts/experimental/arg-purge` is a standalone Go prototype for Part 2.
-Its transport and parsing live in `internal/arg`. Its original candidate
-selector cannot establish current tag assignments from historical Tag entities
-and must not be used as a current-state purge plan. The hybrid command does
-not call that selector. Standalone ARG discovery never untags,
-deletes, pushes, or changes roles. It sends HTTP requests directly from Go
+`scripts/experimental/arg-purge` was a standalone Go prototype for Part 2.
+It and its candidate selector were removed because historical Tag entities
+cannot establish current tag assignments. Native discovery and manifest-body
+validation remain in `internal/arg` for the hybrid command.
+The historical standalone prototype never untagged,
+deleted, pushed, or changed roles. It sent HTTP requests directly from Go
 with Azure Identity ARM credentials, independently selectable regional ARM
 endpoint and API version, and no Azure CLI dependency. Managed-identity
 authentication may contact its hosting environment's identity endpoint;
@@ -199,7 +200,8 @@ titles were not links or local files; their contents were unavailable.
 
 ### Querying the API
 
-Run live candidate selection (defaults: Southeast Asia, API `2024-04-01`):
+The removed prototype used this invocation (defaults: Southeast Asia,
+API `2024-04-01`). This is retained for historical context, not current usage:
 
 ```bash
 go run ./scripts/experimental/arg-purge \
@@ -207,13 +209,9 @@ go run ./scripts/experimental/arg-purge \
   --ago-days 7
 ```
 
-Add `--discover` to return raw records instead of candidates. Capture discovery
-output using `> /path/to/artifacts.json`, then replay it with
-`--snapshot /path/to/artifacts.json --ago-days 0`. The capture contains the
-registry ID and must match the requested registry name or explicit scope.
-Normalized array fixtures still require `--registry-id`, because they have
-no capture envelope. `--registry-id` and `--subscription` are optional
-overrides for live discovery, not required user inputs.
+Its `--discover` flag returned raw records instead of candidates, and
+`--snapshot` replayed captures. These modes were removed with the prototype.
+For current API queries and commands, use the [ARG Mode Guide](arg-mode.md).
 
 The Go command POSTs to
 `https://southeastasia.management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2024-04-01`
