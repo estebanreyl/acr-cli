@@ -19,6 +19,7 @@ import (
 	"github.com/Azure/acr-cli/acr"
 	"github.com/Azure/acr-cli/cmd/mocks"
 	"github.com/Azure/acr-cli/cmd/repository"
+	"github.com/Azure/acr-cli/internal/api"
 	"github.com/Azure/acr-cli/internal/arg"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/stretchr/testify/mock"
@@ -64,6 +65,11 @@ func TestARGHybridRejectsInvalidOptionsBeforeClients(t *testing.T) {
 		{[]string{"--arg", "--dry-run", "--untagged-only", "--arg-subscription", "invalid"}, "invalid ARG options"},
 		{[]string{"--untagged-only", "--arg-registry-id", argTestRegistry}, "requires --arg"},
 		{[]string{"--untagged-only", "--arg-api-version", "2024-04-01"}, "requires --arg"},
+		{[]string{"--arg", "--dry-run", "--untagged-only", "--min-untagged-manifests", "1"}, "--min-untagged-manifests requires --ago"},
+		{[]string{"--arg", "--dry-run", "--untagged-only", "--max-untagged-manifests", "-1"}, "--max-untagged-manifests must be nonnegative"},
+		{[]string{"--arg", "--dry-run", "--untagged-only", "--ago", "1d", "--min-untagged-manifests", "2", "--max-untagged-manifests", "1"}, "--min-untagged-manifests must not exceed"},
+		{[]string{"--arg", "--dry-run", "--untagged-only", "--max-tags", "1"}, "--max-tags cannot be combined with --untagged-only"},
+		{[]string{"--arg", "--dry-run", "--untagged-only", "--keep", "0", "--max-untagged-manifests", "0"}, "none of the others"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			called := false
@@ -89,6 +95,8 @@ func TestARGHybridAcceptsOrdinaryPurgeFlagsAndRegistryCredentials(t *testing.T) 
 		{"--arg", "--dry-run", "--untagged", "--filter", "repo:.*", "--ago", "1d"},
 		{"--arg", "--dry-run", "--untagged-only", "--keep", "2", "--include-locked",
 			"--concurrency", "2", "--repository-page-size", "50", "--verbose", "--config", "test.json"},
+		{"--arg", "--dry-run", "--untagged-only", "--ago", "1d", "--min-untagged-manifests", "2", "--max-untagged-manifests", "5"},
+		{"--arg", "--dry-run", "--untagged", "--filter", "repo:.*", "--max-tags", "0", "--max-untagged-manifests", "0"},
 	} {
 		params := &purgeParameters{rootParameters: &rootParameters{
 			registryName: "testregistry", username: "user", password: "password",
@@ -255,8 +263,9 @@ func TestARGHybridPreservesTaggedNestedChildrenReferrersAndPlannedUntags(t *test
 							Response:       autorest.Response{Response: &http.Response{StatusCode: http.StatusOK}},
 							TagsAttributes: &tags,
 						}, nil).Once()
+					opts := retentionOptions{minTags: -1, maxTags: -1, minManifests: -1, maxManifests: -1, dryRun: true}
 					count, removed, err := purgeTags(context.Background(), client, 4, "testregistry.azurecr.io",
-						"repo", 0, ".*", 0, 60, true, false)
+						"repo", opts, ".*", 60, false)
 					if err != nil || count != 1 {
 						t.Fatalf("failed to simulate the tag-deletion phase: %v", err)
 					}
@@ -270,15 +279,18 @@ func TestARGHybridPreservesTaggedNestedChildrenReferrersAndPlannedUntags(t *test
 					client.On("GetManifest", mock.Anything, "repo", argFixtureDigest(1)).
 						Return([]byte(bodies[argFixtureDigest(1)]), nil).Once()
 				}
-				var manifests []acr.ManifestAttributesBase
+				var manifests []repository.ManifestToDelete
 				var err error
 				cutoff := time.Now().UTC()
+				opts := repository.UntaggedManifestsOptions{
+					DryRun: true, DeleteCutoff: &cutoff, MinManifests: -1, MaxManifests: -1,
+				}
 				if hybrid {
 					manifests, err = repository.GetUntaggedManifests(context.Background(), 4,
-						&argManifestClient{AcrCLIClientInterface: client, cache: cache}, "repo", false, planned, true, false, &cutoff)
+						&argManifestClient{AcrCLIClientInterface: client, cache: cache}, "repo", opts, planned)
 				} else {
 					manifests, err = repository.GetUntaggedManifests(context.Background(), 4,
-						client, "repo", false, planned, true, false, &cutoff)
+						client, "repo", opts, planned)
 				}
 				if err != nil {
 					t.Fatal(err)
@@ -306,6 +318,133 @@ func TestARGHybridPreservesTaggedNestedChildrenReferrersAndPlannedUntags(t *test
 						cache.Stats().MissingFallbacks != 0 || cache.Stats().InvalidFallbacks != invalidFallbacks {
 						t.Fatalf("hybrid changed current-state protection: %v vs %v, %+v", digests, baseline, cache.Stats())
 					}
+				}
+
+				client.AssertExpectations(t)
+			}
+		})
+	}
+}
+
+func TestARGHybridRetentionParity(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		args          []string
+		wantTags      []string
+		wantManifests []int
+	}{
+		{"keep untagged", []string{"--untagged-only", "--ago", "0d", "--keep", "1"}, nil, []int{1, 2, 6}},
+		{"keep both phases", []string{"--untagged", "--ago", "0d", "--keep", "1"}, []string{"ci-old"}, []int{1, 2, 5, 6}},
+		{"minimum protects index children", []string{"--untagged-only", "--ago", "0d", "--min-untagged-manifests", "2"}, nil, []int{6}},
+		{"maximum without age", []string{"--untagged-only", "--max-untagged-manifests", "2"}, nil, []int{6}},
+		{"age and maximum", []string{"--untagged-only", "--ago", "7d", "--max-untagged-manifests", "2"}, nil, []int{6}},
+		{"minimum and maximum both phases", []string{"--untagged", "--ago", "1d", "--min-tags", "1", "--max-tags", "1",
+			"--min-untagged-manifests", "2", "--max-untagged-manifests", "3"}, []string{"ci-old"}, []int{5, 6}},
+		{"zero maximum both phases", []string{"--untagged", "--max-tags", "0", "--max-untagged-manifests", "0"},
+			[]string{"ci-new", "ci-old"}, []int{1, 2, 3, 4, 5, 6}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := &purgeParameters{rootParameters: &rootParameters{registryName: "testregistry"}}
+			cmd := newPurgeCmdWithARGLoader(params, nil)
+			args := append([]string{"--arg", "--dry-run", "--filter", "repo:^ci-"}, tc.args...)
+			if err := cmd.ParseFlags(args); err != nil {
+				t.Fatal(err)
+			}
+			if err := validateARGFlags(cmd, params); err != nil {
+				t.Fatal(err)
+			}
+			opts := retentionOptions{
+				keep: params.keep, minTags: params.minTags, maxTags: params.maxTags,
+				minManifests: params.minUntaggedManifests, maxManifests: params.maxUntaggedManifests, dryRun: true,
+			}
+			if params.ago != "" {
+				duration := mustParseDuration(params.ago)
+				opts.agoDuration = &duration
+			}
+			want := make([]string, 0, len(tc.wantTags)+len(tc.wantManifests))
+			for _, tag := range tc.wantTags {
+				want = append(want, "testregistry.azurecr.io/repo:"+tag)
+			}
+			for _, number := range tc.wantManifests {
+				want = append(want, "testregistry.azurecr.io/repo@"+argFixtureDigest(number))
+			}
+			sort.Strings(want)
+
+			var baseline []string
+			for _, hybrid := range []bool{false, true} {
+				client := &mocks.AcrCLIClientInterface{}
+				client.On("IsAbac").Return(false)
+				imageType := "application/vnd.oci.image.manifest.v1+json"
+				indexType := "application/vnd.oci.image.index.v1+json"
+				bodies := make(map[string]string)
+				metadata := make([]acr.ManifestAttributesBase, 0, 6)
+				now := time.Now().UTC()
+				ages := []time.Duration{48 * time.Hour, 96 * time.Hour, time.Hour, 30 * time.Minute, 120 * time.Hour, 240 * time.Hour}
+				for i, age := range ages {
+					digest, mediaType := argFixtureDigest(i+1), imageType
+					body := fmt.Sprintf(`{"schemaVersion":2,"mediaType":%q,"layers":[]}`, imageType)
+					if i == 0 {
+						mediaType = indexType
+						body = fmt.Sprintf(`{"schemaVersion":2,"mediaType":%q,"manifests":[{"mediaType":%q,"digest":%q}]}`,
+							indexType, imageType, argFixtureDigest(2))
+					}
+					tags := []string{}
+					if i == 3 {
+						tags = []string{"ci-new"}
+					} else if i == 4 {
+						tags = []string{"ci-old"}
+					}
+					updated := now.Add(-age).Format(time.RFC3339Nano)
+					metadata = append(metadata, acr.ManifestAttributesBase{
+						Digest: &digest, MediaType: &mediaType, LastUpdateTime: &updated, Tags: &tags,
+					})
+					bodies[digest] = body
+					if !hybrid {
+						client.On("GetManifest", mock.Anything, "repo", digest).Return([]byte(body), nil).Maybe()
+					}
+				}
+				client.On("GetAcrManifests", mock.Anything, "repo", "", "").
+					Return(&acr.Manifests{ManifestsAttributes: &metadata}, nil).Once()
+				client.On("GetAcrManifests", mock.Anything, "repo", "", argFixtureDigest(6)).
+					Return(EmptyListManifestsResult, nil).Once()
+				if !params.untaggedOnly {
+					tags := []acr.TagAttributesBase{
+						{Name: &(*metadata[3].Tags)[0], Digest: metadata[3].Digest, LastUpdateTime: metadata[3].LastUpdateTime},
+						{Name: &(*metadata[4].Tags)[0], Digest: metadata[4].Digest, LastUpdateTime: metadata[4].LastUpdateTime},
+					}
+					client.On("GetAcrTags", mock.Anything, "repo", "timedesc", "").
+						Return(&acr.RepositoryTagsType{
+							Response:       autorest.Response{Response: &http.Response{StatusCode: http.StatusOK}},
+							TagsAttributes: &tags,
+						}, nil).Once()
+				}
+				cache := argFixtureCache(t, bodies)
+				var purgeClient api.AcrCLIClientInterface = client
+				if hybrid {
+					purgeClient = &argManifestClient{AcrCLIClientInterface: client, cache: cache}
+				}
+				output := capturePurgeOutput(t, func() {
+					tags, manifests, err := purge(context.Background(), purgeClient, "testregistry.azurecr.io", 4,
+						opts, 60, true, params.untaggedOnly, map[string]string{"repo": "^ci-"}, false)
+					if err != nil || tags != len(tc.wantTags) || manifests != len(tc.wantManifests) {
+						t.Fatalf("hybrid=%v: tags=%d manifests=%d err=%v", hybrid, tags, manifests, err)
+					}
+				})
+				selected := []string{}
+				for _, line := range strings.Split(output, "\n") {
+					if strings.HasPrefix(line, "Would delete: ") {
+						selected = append(selected, strings.Fields(line)[2])
+					}
+				}
+				sort.Strings(selected)
+				if !reflect.DeepEqual(selected, want) {
+					t.Fatalf("hybrid=%v: selected %v, want %v", hybrid, selected, want)
+				}
+				if !hybrid {
+					baseline = selected
+				} else if !reflect.DeepEqual(selected, baseline) || cache.Stats().Hits == 0 ||
+					cache.Stats().MissingFallbacks != 0 || cache.Stats().InvalidFallbacks != 0 {
+					t.Fatalf("ARG retention parity failed: %+v", cache.Stats())
 				}
 				client.AssertExpectations(t)
 			}

@@ -15,7 +15,7 @@ steps:
 
 - task: GoTool@0
   inputs:
-    version: '1.25.0'
+    version: '1.26'
 
 - script: |
     (robocopy $(system.defaultWorkingDirectory) $(ModulePath) /E /XD  $(system.defaultWorkingDirectory)\work)^& IF %ERRORLEVEL% LSS 8 SET ERRORLEVEL = 0
@@ -29,6 +29,6 @@ steps:
   displayName: 'Build'
 
 - script: |
-    go test -v ./... 
+    go test -v ./...
   workingDirectory: '$(ModulePath)'
   displayName: 'Test'

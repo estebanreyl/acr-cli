@@ -160,6 +160,48 @@ per repository. The manifest phase is not restricted to manifests that had
 `ci-*` tags: it also considers other eligible untagged manifests in the selected
 repositories. This is not a tag-prefix-based manifest ownership policy.
 
+### Minimum and Maximum Retention
+
+ARG mode uses the same count policies as ordinary purge. These limits apply
+per repository using live registry timestamps and current tag assignments,
+not ARG ordering or historical Tag entities.
+
+| Option | Behavior |
+| --- | --- |
+| `--keep N` | Preserve the newest N items among those otherwise selected for deletion |
+| `--min-tags N` | Protect the newest N matching tags from age-based deletion |
+| `--max-tags N` | Select matching tags outside the newest N, regardless of age |
+| `--min-untagged-manifests N` | Protect the newest N dangling manifest candidates from age-based deletion |
+| `--max-untagged-manifests N` | Select dangling manifest candidates outside the newest N, regardless of age |
+
+Minimums require `--ago`. Maximums can be used without an age cutoff; when
+combined with `--ago`, either exceeding the maximum or satisfying the age
+rule selects an item. A minimum protects the newest items from the age rule.
+`--keep` cannot be combined with any minimum/maximum flag.
+
+For example, protect the newest 20 dangling candidates, delete other candidates
+older than 30 days, and also select candidates outside the newest 100:
+
+```sh
+acr purge -r <registry-name> --arg --dry-run \
+    --untagged-only --ago 30d \
+    --min-untagged-manifests 20 --max-untagged-manifests 100
+```
+
+Or simulate a count-only tag and manifest cleanup, without an age cutoff:
+
+```sh
+acr purge -r <registry-name> --arg --dry-run \
+    --untagged --filter '^build/.*$:^ci-.*$' \
+    --max-tags 50 --max-untagged-manifests 100
+```
+
+Tag policies run first; manifest policies use the simulated post-untag state.
+Tagged objects, referrers, and children of retained indexes remain protected.
+Dependency protection can leave more items than the requested maximum.
+All limits are nonnegative, zero is meaningful, and a minimum cannot exceed
+its corresponding maximum. Tag limits cannot be used with `--untagged-only`.
+
 ### Compare With Ordinary Purge
 
 Run the same scenario twice, adding only `--arg` for the second invocation:
