@@ -8,7 +8,7 @@ require (
 	github.com/Azure/go-autorest/autorest v0.11.30
 	github.com/Azure/go-autorest/autorest/adal v0.9.24
 	github.com/Azure/go-autorest/tracing v0.6.1
-	github.com/alitto/pond/v2 v2.7.2
+	github.com/alitto/pond/v2 v2.7.3
 	github.com/dlclark/regexp2 v1.12.0
 	github.com/docker/cli v29.9.1+incompatible
 	github.com/golang-jwt/jwt/v4 v4.5.2
@@ -19,7 +19,7 @@ require (
 	github.com/sirupsen/logrus v1.10.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
-	oras.land/oras-go/v2 v2.6.3
+	oras.land/oras-go/v2 v2.6.4
 )
 
 require (

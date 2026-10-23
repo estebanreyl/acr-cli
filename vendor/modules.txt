@@ -81,7 +81,7 @@ github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/shared
 github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/version
 github.com/AzureAD/microsoft-authentication-library-for-go/apps/managedidentity
 github.com/AzureAD/microsoft-authentication-library-for-go/apps/public
-# github.com/alitto/pond/v2 v2.7.2
+# github.com/alitto/pond/v2 v2.7.3
 ## explicit; go 1.20
 github.com/alitto/pond/v2
 github.com/alitto/pond/v2/internal/future
@@ -188,7 +188,7 @@ golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
 # gotest.tools/v3 v3.2.0
 ## explicit; go 1.13
-# oras.land/oras-go/v2 v2.6.3
+# oras.land/oras-go/v2 v2.6.4
 ## explicit; go 1.26.0
 oras.land/oras-go/v2
 oras.land/oras-go/v2/content
