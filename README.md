@@ -319,8 +319,8 @@ than silently switching the entire operation to registry reads.
 
 Output remains advisory. Indexed body fidelity, especially live referrer
 subjects, is not yet fully established. No deletion mode is available through
-`--arg`. See [ARG purge investigation](docs/arg-purge-integration.md) for the
-hybrid design, comparisons, and earlier pure-ARG limitations.
+`--arg`. See the [ARG purge integration requirements spec](https://github.com/azure-management-and-platforms/acr-specs/pull/209)
+for the hybrid design, comparisons, and earlier pure-ARG limitations.
 
 For temporary request-volume comparisons, add `--debug-request-counts` to
 either ordinary purge or the ARG hybrid:

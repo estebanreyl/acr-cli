@@ -491,8 +491,9 @@ not independently verify every indexed body or subject.
 | Existing dependency and referrer behavior | [`cmd/repository/image_functions.go`](../cmd/repository/image_functions.go) |
 | Temporary HTTP attempt counters | [`internal/requestcount/counter.go`](../internal/requestcount/counter.go) |
 
-The [investigation notes](arg-purge-integration.md) retain the original
-pure-ARG experiments, schema findings, limitations, and comparison details.
-They are historical evidence, not a replacement for this guide. The standalone
-pure-ARG prototype and its historical-tag candidate selector have been removed.
+The [ARG purge integration requirements spec](https://github.com/azure-management-and-platforms/acr-specs/pull/209)
+retains the original pure-ARG experiments, schema findings, limitations, and
+comparison details. It is historical evidence, not a replacement for this
+guide. The standalone pure-ARG prototype and its historical-tag candidate
+selector have been removed.
 Use `acr purge --arg --dry-run` for the supported hybrid experiment.
