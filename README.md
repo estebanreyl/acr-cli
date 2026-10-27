@@ -233,6 +233,114 @@ acr purge \
 
 Note: The `--untagged` and `--untagged-only` flags are mutually exclusive.
 
+#### Experimental ARG Manifest Cache
+
+See the [ARG Mode Guide](docs/arg-mode.md) for the hybrid architecture,
+exact API queries, Kusto examples, common cleanup scenarios, and guidance
+for building custom cleanup policies.
+
+Use `--arg` to supply manifest bodies from Azure Resource Graph while keeping
+ordinary purge decisions based on live registry metadata. The hybrid is
+**dry-run only** and requires `--untagged-only` or `--untagged`, plus
+`--dry-run`. It does not use historical ARG Tag entities.
+
+```sh
+acr purge \
+    --registry <Registry Name> \
+    --arg \
+    --untagged-only \
+    --ago 7d \
+    --dry-run
+
+# Simulate untagging first, then clean up newly untagged manifests.
+acr purge \
+    --registry <Registry Name> \
+    --arg \
+    --filter '^sample-[1-5]$:.*' \
+    --untagged \
+    --ago 7d \
+    --dry-run
+```
+
+Prerequisites: ordinary registry authentication, ARG artifact indexing enabled
+for the registry, and an ARM identity with access to its registry resource
+and ARG artifact records. Registry credentials alone do not provide ARG access.
+ARG requests are sent directly from Go; Azure CLI and its `resource-graph`
+extension are not required.
+
+Authentication uses Azure Identity's `DefaultAzureCredential`. It supports
+service-principal environment credentials, workload identity, and managed
+identity, followed by optional local development credentials such as
+Azure CLI login. For service principals, configure `AZURE_TENANT_ID`,
+`AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET` (or the supported certificate
+configuration). Workload identity uses `AZURE_FEDERATED_TOKEN_FILE` alongside
+tenant/client configuration. Managed identity uses the hosting environment;
+`AZURE_CLIENT_ID` selects a user-assigned identity.
+
+Set `AZURE_TOKEN_CREDENTIALS=prod` to restrict authentication to hosted
+credential types, or a specific type such as `ManagedIdentityCredential`.
+For local Azure CLI authentication, use `az login` and optionally
+`AZURE_TOKEN_CREDENTIALS=AzureCLICredential`. Azure CLI is then only a token
+source, not the HTTP client. In an ACR Task/container, the ARM identity must
+actually be available and authorized; registry credentials alone do not
+provide ARG access.
+
+Registry catalog and metadata listings remain authoritative for current tags,
+`lastUpdateTime`, locks, filters, and retention. The existing purge code also
+simulates planned tag removals before identifying untagged manifests.
+ARG Manifest bodies supply parent/child descriptors and referrer subjects to
+that same code, replacing individual manifest-body GETs when available.
+Historical tag assignments never become protection roots or deletion inputs.
+
+Ordinary options, including `--keep`, all four minimum/maximum retention flags,
+`--include-locked`, `--concurrency`,
+`--repository-page-size`, `--verbose`, and registry authentication/configuration,
+remain supported. As with ordinary `--untagged-only`, the tag portion of
+`--filter` is ignored and `--ago` is optional. Tag-plus-manifest mode still
+requires `--filter` and either `--ago` or `--max-tags`. Minimum limits require
+`--ago`, and `--keep` cannot be combined with minimum/maximum limits.
+
+`--arg-region` selects the regional ARM endpoint (default `southeastasia`;
+use `global` for the global endpoint), and `--arg-api-version` selects the
+ARG API version (default `2024-04-01`). Registry lookup queries subscriptions
+accessible to the ARM identity by default. Use `--arg-subscription <UUID>`
+to constrain that lookup, or `--arg-registry-id <ARM ID>` to skip it.
+These optional overrides must agree with `--registry` and each other;
+ambiguous, incomplete, or missing resource matches are errors. All
+ARG-specific options require `--arg`. This prototype targets the public
+Azure cloud.
+
+Missing, malformed, unsupported, or ambiguous indexed bodies use an explicit
+registry manifest GET fallback. Rejected bodies generate warnings, and the
+summary reports cache hits, query pages, and missing/invalid fallback counts.
+An empty ARG body inventory is allowed; it does not imply an empty registry.
+ARG authentication, query, and pagination errors abort initialization rather
+than silently switching the entire operation to registry reads.
+
+Output remains advisory. Indexed body fidelity, especially live referrer
+subjects, is not yet fully established. No deletion mode is available through
+`--arg`. See the [ARG purge integration requirements spec](https://github.com/azure-management-and-platforms/acr-specs/pull/209)
+for the hybrid design, comparisons, and earlier pure-ARG limitations.
+
+For temporary request-volume comparisons, add `--debug-request-counts` to
+either ordinary purge or the ARG hybrid:
+
+```sh
+acr purge -r <Registry Name> --dry-run --untagged-only --ago 0d \
+    --filter '^sample-[1-5]$:ignored' --debug-request-counts
+# Repeat with --arg, keeping the other options unchanged.
+```
+
+The summary counts HTTP attempts by registry authentication, catalog,
+tag listing, manifest metadata listing, manifest body GET, other registry
+requests, and ARG queries. Retries and failed send attempts are included;
+cache hits are not HTTP requests. Counts exclude ARM credential acquisition,
+external processes such as Azure CLI/credential helpers, and redirects inside
+the HTTP client. This is a per-run diagnostic, not an end-to-end network trace.
+It records no URLs, query strings, headers, tokens, or bodies. The summary is
+also printed if a request fails; without the flag, no request-count output
+is added.
+
 #### Keep flag
 
 To keep the latest x number of items that would otherwise be deleted, the `--keep` flag should be set. The count is applied per repository. By default, it preserves tags. When `--untagged` is also set, `--keep` is applied independently to tags and untagged manifests, preserving up to the specified number of each in every repository. With `--untagged-only`, it applies only to untagged manifests.

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Azure/acr-cli/internal/requestcount"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/adal"
 )
@@ -231,6 +232,18 @@ func TestGetAcrCLIClientWithAuth(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got.AutorestClient.Authorizer, wantAuthorizer) {
 				t.Error("incorrect AutorestClient.Authorizer")
+			}
+			ctx, counter := requestcount.WithCounter(context.Background())
+			_, err = GetAcrCLIClientWithAuthContext(ctx, tt.loginURL, tt.username, tt.password, []string{configFilePath})
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantCount := "registry_auth=1 "
+			if tt.useBasicAuth {
+				wantCount = "registry_auth=0 "
+			}
+			if !strings.Contains(counter.Summary(), wantCount) {
+				t.Fatalf("initial authentication count incorrect: %s", counter.Summary())
 			}
 		})
 	}

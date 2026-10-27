@@ -29,6 +29,6 @@ steps:
   displayName: 'Build'
 
 - script: |
-    go test -v ./... 
+    go test -v ./...
   workingDirectory: '$(ModulePath)'
   displayName: 'Test'
